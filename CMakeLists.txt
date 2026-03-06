@@ -36,6 +36,7 @@ set(APP_SOURCES
     src/RText.cpp
     src/RTextures.cpp
     src/RaylibConstants.cpp
+    src/FileModule.cpp
 )
 
 # Create executable

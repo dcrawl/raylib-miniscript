@@ -7,6 +7,7 @@
 #include "MiniscriptIntrinsics.h"
 #include "MiniscriptParser.h"
 #include "RaylibIntrinsics.h"
+#include "FileModule.h"
 #include "loadfile.h"
 #include <stdio.h>
 
@@ -324,6 +325,11 @@ void InitMiniScript() {
 
 	// Add Raylib intrinsics
 	AddRaylibIntrinsics();
+
+#ifndef PLATFORM_WEB
+	// Add file module (desktop only)
+	AddFileModuleIntrinsics();
+#endif
 
 	// Add import intrinsic
 	Intrinsic *importFunc = Intrinsic::Create("import");
