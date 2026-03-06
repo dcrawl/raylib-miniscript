@@ -12,6 +12,7 @@
 #include "MiniscriptInterpreter.h"
 #include "MiniscriptTypes.h"
 #include "macros.h"
+#include <vector>
 
 #ifdef PLATFORM_WEB
 #include <emscripten.h>
@@ -48,6 +49,248 @@ EM_ASYNC_JS(void, _SetWindowIcon_Web, (unsigned char *data, long size), {
 
 using namespace MiniScript;
 
+static void SyncCamera3DValue(Value cameraValue, Camera3D camera) {
+	if (cameraValue.type != ValueType::Map) return;
+	ValueDict map = cameraValue.GetDict();
+
+	map.SetValue(String("position"), Vector3ToValue(camera.position));
+	map.SetValue(String("target"), Vector3ToValue(camera.target));
+	map.SetValue(String("up"), Vector3ToValue(camera.up));
+	map.SetValue(String("fovy"), Value(camera.fovy));
+	map.SetValue(String("projection"), Value(camera.projection));
+
+	map.SetValue(String("positionX"), Value(camera.position.x));
+	map.SetValue(String("positionY"), Value(camera.position.y));
+	map.SetValue(String("positionZ"), Value(camera.position.z));
+	map.SetValue(String("targetX"), Value(camera.target.x));
+	map.SetValue(String("targetY"), Value(camera.target.y));
+	map.SetValue(String("targetZ"), Value(camera.target.z));
+	map.SetValue(String("upX"), Value(camera.up.x));
+	map.SetValue(String("upY"), Value(camera.up.y));
+	map.SetValue(String("upZ"), Value(camera.up.z));
+}
+
+static Shader* GetShaderPtr(Value shaderValue) {
+	if (shaderValue.type != ValueType::Map) return nullptr;
+	ValueDict map = shaderValue.GetDict();
+	Value handleVal = map.Lookup(String("_handle"), Value::zero);
+	return (Shader*)ValueToPointer(handleVal);
+}
+
+static void SyncShaderValue(Value shaderValue, Shader shader) {
+	if (shaderValue.type != ValueType::Map) return;
+	ValueDict map = shaderValue.GetDict();
+	map.SetValue(String("id"), Value((int)shader.id));
+}
+
+static int ShaderUniformComponentCount(int uniformType) {
+	switch (uniformType) {
+		case SHADER_UNIFORM_VEC2:
+		case SHADER_UNIFORM_IVEC2:
+		case SHADER_UNIFORM_UIVEC2: return 2;
+		case SHADER_UNIFORM_VEC3:
+		case SHADER_UNIFORM_IVEC3:
+		case SHADER_UNIFORM_UIVEC3: return 3;
+		case SHADER_UNIFORM_VEC4:
+		case SHADER_UNIFORM_IVEC4:
+		case SHADER_UNIFORM_UIVEC4: return 4;
+		default: return 1;
+	}
+}
+
+static bool IsShaderUniformFloatType(int uniformType) {
+	return uniformType == SHADER_UNIFORM_FLOAT
+		|| uniformType == SHADER_UNIFORM_VEC2
+		|| uniformType == SHADER_UNIFORM_VEC3
+		|| uniformType == SHADER_UNIFORM_VEC4;
+}
+
+static bool IsShaderUniformIntType(int uniformType) {
+	return uniformType == SHADER_UNIFORM_INT
+		|| uniformType == SHADER_UNIFORM_IVEC2
+		|| uniformType == SHADER_UNIFORM_IVEC3
+		|| uniformType == SHADER_UNIFORM_IVEC4
+		|| uniformType == SHADER_UNIFORM_SAMPLER2D;
+}
+
+static bool IsShaderUniformUIntType(int uniformType) {
+	return uniformType == SHADER_UNIFORM_UINT
+		|| uniformType == SHADER_UNIFORM_UIVEC2
+		|| uniformType == SHADER_UNIFORM_UIVEC3
+		|| uniformType == SHADER_UNIFORM_UIVEC4;
+}
+
+static void FillFloatComponentsFromValue(Value value, float* out, int components) {
+	for (int i = 0; i < components; i++) out[i] = 0.0f;
+
+	if (value.type == ValueType::List) {
+		ValueList list = value.GetList();
+		int n = list.Count();
+		if (n > components) n = components;
+		for (int i = 0; i < n; i++) out[i] = list[i].FloatValue();
+		return;
+	}
+
+	if (value.type == ValueType::Map) {
+		ValueDict map = value.GetDict();
+		if (components > 0) out[0] = map.Lookup(String("x"), map.Lookup(String("r"), Value::zero)).FloatValue();
+		if (components > 1) out[1] = map.Lookup(String("y"), map.Lookup(String("g"), Value::zero)).FloatValue();
+		if (components > 2) out[2] = map.Lookup(String("z"), map.Lookup(String("b"), Value::zero)).FloatValue();
+		if (components > 3) out[3] = map.Lookup(String("w"), map.Lookup(String("a"), Value::zero)).FloatValue();
+		return;
+	}
+
+	if (components > 0) out[0] = value.FloatValue();
+}
+
+static void FillIntComponentsFromValue(Value value, int* out, int components) {
+	for (int i = 0; i < components; i++) out[i] = 0;
+
+	if (value.type == ValueType::List) {
+		ValueList list = value.GetList();
+		int n = list.Count();
+		if (n > components) n = components;
+		for (int i = 0; i < n; i++) out[i] = list[i].IntValue();
+		return;
+	}
+
+	if (value.type == ValueType::Map) {
+		ValueDict map = value.GetDict();
+		if (components > 0) out[0] = map.Lookup(String("x"), map.Lookup(String("r"), Value::zero)).IntValue();
+		if (components > 1) out[1] = map.Lookup(String("y"), map.Lookup(String("g"), Value::zero)).IntValue();
+		if (components > 2) out[2] = map.Lookup(String("z"), map.Lookup(String("b"), Value::zero)).IntValue();
+		if (components > 3) out[3] = map.Lookup(String("w"), map.Lookup(String("a"), Value::zero)).IntValue();
+		return;
+	}
+
+	if (components > 0) out[0] = value.IntValue();
+}
+
+static void FillUIntComponentsFromValue(Value value, unsigned int* out, int components) {
+	for (int i = 0; i < components; i++) out[i] = 0;
+
+	if (value.type == ValueType::List) {
+		ValueList list = value.GetList();
+		int n = list.Count();
+		if (n > components) n = components;
+		for (int i = 0; i < n; i++) {
+			int v = list[i].IntValue();
+			out[i] = (unsigned int)(v < 0 ? 0 : v);
+		}
+		return;
+	}
+
+	if (value.type == ValueType::Map) {
+		ValueDict map = value.GetDict();
+		if (components > 0) { int v = map.Lookup(String("x"), map.Lookup(String("r"), Value::zero)).IntValue(); out[0] = (unsigned int)(v < 0 ? 0 : v); }
+		if (components > 1) { int v = map.Lookup(String("y"), map.Lookup(String("g"), Value::zero)).IntValue(); out[1] = (unsigned int)(v < 0 ? 0 : v); }
+		if (components > 2) { int v = map.Lookup(String("z"), map.Lookup(String("b"), Value::zero)).IntValue(); out[2] = (unsigned int)(v < 0 ? 0 : v); }
+		if (components > 3) { int v = map.Lookup(String("w"), map.Lookup(String("a"), Value::zero)).IntValue(); out[3] = (unsigned int)(v < 0 ? 0 : v); }
+		return;
+	}
+
+	if (components > 0) {
+		int v = value.IntValue();
+		out[0] = (unsigned int)(v < 0 ? 0 : v);
+	}
+}
+
+static void PackFloatUniformData(Value value, int components, int& count, std::vector<float>& out) {
+	out.clear();
+
+	if (value.type == ValueType::List) {
+		ValueList list = value.GetList();
+		bool nested = list.Count() > 0 && (list[0].type == ValueType::List || list[0].type == ValueType::Map);
+
+		if (nested) {
+			for (int n = 0; n < list.Count(); n++) {
+				float tmp[4] = {0, 0, 0, 0};
+				FillFloatComponentsFromValue(list[n], tmp, components);
+				for (int c = 0; c < components; c++) out.push_back(tmp[c]);
+			}
+			if (count <= 0) count = list.Count();
+		} else {
+			for (int n = 0; n < list.Count(); n++) out.push_back(list[n].FloatValue());
+			if (count <= 0) count = (list.Count() + components - 1) / components;
+		}
+	} else {
+		float tmp[4] = {0, 0, 0, 0};
+		FillFloatComponentsFromValue(value, tmp, components);
+		for (int c = 0; c < components; c++) out.push_back(tmp[c]);
+		if (count <= 0) count = 1;
+	}
+
+	if (count <= 0) count = 1;
+	int needed = count * components;
+	if ((int)out.size() < needed) out.resize(needed, 0.0f);
+	if ((int)out.size() > needed) out.resize(needed);
+}
+
+static void PackIntUniformData(Value value, int components, int& count, std::vector<int>& out) {
+	out.clear();
+
+	if (value.type == ValueType::List) {
+		ValueList list = value.GetList();
+		bool nested = list.Count() > 0 && (list[0].type == ValueType::List || list[0].type == ValueType::Map);
+
+		if (nested) {
+			for (int n = 0; n < list.Count(); n++) {
+				int tmp[4] = {0, 0, 0, 0};
+				FillIntComponentsFromValue(list[n], tmp, components);
+				for (int c = 0; c < components; c++) out.push_back(tmp[c]);
+			}
+			if (count <= 0) count = list.Count();
+		} else {
+			for (int n = 0; n < list.Count(); n++) out.push_back(list[n].IntValue());
+			if (count <= 0) count = (list.Count() + components - 1) / components;
+		}
+	} else {
+		int tmp[4] = {0, 0, 0, 0};
+		FillIntComponentsFromValue(value, tmp, components);
+		for (int c = 0; c < components; c++) out.push_back(tmp[c]);
+		if (count <= 0) count = 1;
+	}
+
+	if (count <= 0) count = 1;
+	int needed = count * components;
+	if ((int)out.size() < needed) out.resize(needed, 0);
+	if ((int)out.size() > needed) out.resize(needed);
+}
+
+static void PackUIntUniformData(Value value, int components, int& count, std::vector<unsigned int>& out) {
+	out.clear();
+
+	if (value.type == ValueType::List) {
+		ValueList list = value.GetList();
+		bool nested = list.Count() > 0 && (list[0].type == ValueType::List || list[0].type == ValueType::Map);
+
+		if (nested) {
+			for (int n = 0; n < list.Count(); n++) {
+				unsigned int tmp[4] = {0, 0, 0, 0};
+				FillUIntComponentsFromValue(list[n], tmp, components);
+				for (int c = 0; c < components; c++) out.push_back(tmp[c]);
+			}
+			if (count <= 0) count = list.Count();
+		} else {
+			for (int n = 0; n < list.Count(); n++) {
+				int v = list[n].IntValue();
+				out.push_back((unsigned int)(v < 0 ? 0 : v));
+			}
+			if (count <= 0) count = (list.Count() + components - 1) / components;
+		}
+	} else {
+		unsigned int tmp[4] = {0, 0, 0, 0};
+		FillUIntComponentsFromValue(value, tmp, components);
+		for (int c = 0; c < components; c++) out.push_back(tmp[c]);
+		if (count <= 0) count = 1;
+	}
+
+	if (count <= 0) count = 1;
+	int needed = count * components;
+	if ((int)out.size() < needed) out.resize(needed, 0);
+	if ((int)out.size() > needed) out.resize(needed);
+}
+
 void AddRCoreMethods(ValueDict raylibModule) {
 	Intrinsic *i;
 
@@ -76,6 +319,331 @@ void AddRCoreMethods(ValueDict raylibModule) {
 		return IntrinsicResult::Null;
 	};
 	raylibModule.SetValue("ClearBackground", i->GetFunc());
+
+	// 3D camera and projection functions
+
+	i = Intrinsic::Create("");
+	i->AddParam("camera");
+	i->code = INTRINSIC_LAMBDA {
+		Camera3D camera = ValueToCamera3D(context->GetVar(String("camera")));
+		BeginMode3D(camera);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("BeginMode3D", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		EndMode3D();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("EndMode3D", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("camera");
+	i->code = INTRINSIC_LAMBDA {
+		Vector2 position = ValueToVector2(context->GetVar(String("position")));
+		Camera3D camera = ValueToCamera3D(context->GetVar(String("camera")));
+		Ray ray = GetScreenToWorldRay(position, camera);
+		return IntrinsicResult(RayToValue(ray));
+	};
+	raylibModule.SetValue("GetScreenToWorldRay", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("camera");
+	i->AddParam("width", Value::zero);
+	i->AddParam("height", Value::zero);
+	i->code = INTRINSIC_LAMBDA {
+		Vector2 position = ValueToVector2(context->GetVar(String("position")));
+		Camera3D camera = ValueToCamera3D(context->GetVar(String("camera")));
+		int width = context->GetVar(String("width")).IntValue();
+		int height = context->GetVar(String("height")).IntValue();
+		if (width <= 0) width = GetScreenWidth();
+		if (height <= 0) height = GetScreenHeight();
+		Ray ray = GetScreenToWorldRayEx(position, camera, width, height);
+		return IntrinsicResult(RayToValue(ray));
+	};
+	raylibModule.SetValue("GetScreenToWorldRayEx", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("camera");
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		Camera3D camera = ValueToCamera3D(context->GetVar(String("camera")));
+		Vector2 result = GetWorldToScreen(position, camera);
+		return IntrinsicResult(Vector2ToValue(result));
+	};
+	raylibModule.SetValue("GetWorldToScreen", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("camera");
+	i->AddParam("width", Value::zero);
+	i->AddParam("height", Value::zero);
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		Camera3D camera = ValueToCamera3D(context->GetVar(String("camera")));
+		int width = context->GetVar(String("width")).IntValue();
+		int height = context->GetVar(String("height")).IntValue();
+		if (width <= 0) width = GetScreenWidth();
+		if (height <= 0) height = GetScreenHeight();
+		Vector2 result = GetWorldToScreenEx(position, camera, width, height);
+		return IntrinsicResult(Vector2ToValue(result));
+	};
+	raylibModule.SetValue("GetWorldToScreenEx", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("camera");
+	i->code = INTRINSIC_LAMBDA {
+		Camera3D camera = ValueToCamera3D(context->GetVar(String("camera")));
+		return IntrinsicResult(MatrixToValue(GetCameraMatrix(camera)));
+	};
+	raylibModule.SetValue("GetCameraMatrix", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("camera");
+	i->AddParam("mode", Value(CAMERA_CUSTOM));
+	i->code = INTRINSIC_LAMBDA {
+		Value cameraValue = context->GetVar(String("camera"));
+		Camera3D camera = ValueToCamera3D(cameraValue);
+		int mode = context->GetVar(String("mode")).IntValue();
+		UpdateCamera((Camera*)&camera, mode);
+		SyncCamera3DValue(cameraValue, camera);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("UpdateCamera", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("camera");
+	i->AddParam("movement", Vector3ToValue(Vector3{0, 0, 0}));
+	i->AddParam("rotation", Vector3ToValue(Vector3{0, 0, 0}));
+	i->AddParam("zoom", Value::zero);
+	i->code = INTRINSIC_LAMBDA {
+		Value cameraValue = context->GetVar(String("camera"));
+		Camera3D camera = ValueToCamera3D(cameraValue);
+		Vector3 movement = ValueToVector3(context->GetVar(String("movement")));
+		Vector3 rotation = ValueToVector3(context->GetVar(String("rotation")));
+		float zoom = context->GetVar(String("zoom")).FloatValue();
+		UpdateCameraPro((Camera*)&camera, movement, rotation, zoom);
+		SyncCamera3DValue(cameraValue, camera);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("UpdateCameraPro", i->GetFunc());
+
+	// Shader functions
+
+	i = Intrinsic::Create("");
+	i->AddParam("vsFileName", String());
+	i->AddParam("fsFileName", String());
+	i->code = INTRINSIC_LAMBDA {
+		String vsFileName = context->GetVar(String("vsFileName")).ToString();
+		String fsFileName = context->GetVar(String("fsFileName")).ToString();
+		const char* vsPtr = vsFileName.LengthB() > 0 ? vsFileName.c_str() : nullptr;
+		const char* fsPtr = fsFileName.LengthB() > 0 ? fsFileName.c_str() : nullptr;
+		Shader shader = LoadShader(vsPtr, fsPtr);
+		if (!IsShaderValid(shader)) return IntrinsicResult::Null;
+		return IntrinsicResult(ShaderToValue(shader));
+	};
+	raylibModule.SetValue("LoadShader", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("vsCode", String());
+	i->AddParam("fsCode", String());
+	i->code = INTRINSIC_LAMBDA {
+		String vsCode = context->GetVar(String("vsCode")).ToString();
+		String fsCode = context->GetVar(String("fsCode")).ToString();
+		const char* vsPtr = vsCode.LengthB() > 0 ? vsCode.c_str() : nullptr;
+		const char* fsPtr = fsCode.LengthB() > 0 ? fsCode.c_str() : nullptr;
+		Shader shader = LoadShaderFromMemory(vsPtr, fsPtr);
+		if (!IsShaderValid(shader)) return IntrinsicResult::Null;
+		return IntrinsicResult(ShaderToValue(shader));
+	};
+	raylibModule.SetValue("LoadShaderFromMemory", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		return IntrinsicResult(IsShaderValid(shader));
+	};
+	raylibModule.SetValue("IsShaderValid", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		BeginShaderMode(shader);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("BeginShaderMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		EndShaderMode();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("EndShaderMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->AddParam("uniformName");
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		String uniformName = context->GetVar(String("uniformName")).ToString();
+		return IntrinsicResult(GetShaderLocation(shader, uniformName.c_str()));
+	};
+	raylibModule.SetValue("GetShaderLocation", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->AddParam("attribName");
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		String attribName = context->GetVar(String("attribName")).ToString();
+		return IntrinsicResult(GetShaderLocationAttrib(shader, attribName.c_str()));
+	};
+	raylibModule.SetValue("GetShaderLocationAttrib", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->AddParam("locIndex");
+	i->AddParam("mat");
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		int locIndex = context->GetVar(String("locIndex")).IntValue();
+		Matrix mat = ValueToMatrix(context->GetVar(String("mat")));
+		SetShaderValueMatrix(shader, locIndex, mat);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("SetShaderValueMatrix", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->AddParam("locIndex");
+	i->AddParam("texture");
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		int locIndex = context->GetVar(String("locIndex")).IntValue();
+		Texture2D texture = ValueToTexture(context->GetVar(String("texture")));
+		SetShaderValueTexture(shader, locIndex, texture);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("SetShaderValueTexture", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->AddParam("locIndex");
+	i->AddParam("value");
+	i->AddParam("uniformType", Value(SHADER_UNIFORM_FLOAT));
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		int locIndex = context->GetVar(String("locIndex")).IntValue();
+		Value value = context->GetVar(String("value"));
+		int uniformType = context->GetVar(String("uniformType")).IntValue();
+
+		BinaryData* rawData = nullptr;
+		if (value.type == ValueType::Map) rawData = ValueToRawData(value);
+		if (rawData != nullptr && rawData->bytes != nullptr && rawData->length > 0) {
+			SetShaderValue(shader, locIndex, rawData->bytes, uniformType);
+			return IntrinsicResult::Null;
+		}
+
+		int components = ShaderUniformComponentCount(uniformType);
+		if (IsShaderUniformFloatType(uniformType)) {
+			std::vector<float> packed;
+			int count = 1;
+			PackFloatUniformData(value, components, count, packed);
+			SetShaderValue(shader, locIndex, packed.data(), uniformType);
+			return IntrinsicResult::Null;
+		}
+
+		if (IsShaderUniformIntType(uniformType)) {
+			std::vector<int> packed;
+			int count = 1;
+			PackIntUniformData(value, components, count, packed);
+			SetShaderValue(shader, locIndex, packed.data(), uniformType);
+			return IntrinsicResult::Null;
+		}
+
+		if (IsShaderUniformUIntType(uniformType)) {
+			std::vector<unsigned int> packed;
+			int count = 1;
+			PackUIntUniformData(value, components, count, packed);
+			SetShaderValue(shader, locIndex, packed.data(), uniformType);
+			return IntrinsicResult::Null;
+		}
+
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("SetShaderValue", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->AddParam("locIndex");
+	i->AddParam("value");
+	i->AddParam("uniformType", Value(SHADER_UNIFORM_FLOAT));
+	i->AddParam("count", Value::zero);
+	i->code = INTRINSIC_LAMBDA {
+		Shader shader = ValueToShader(context->GetVar(String("shader")));
+		int locIndex = context->GetVar(String("locIndex")).IntValue();
+		Value value = context->GetVar(String("value"));
+		int uniformType = context->GetVar(String("uniformType")).IntValue();
+		int count = context->GetVar(String("count")).IntValue();
+
+		BinaryData* rawData = nullptr;
+		if (value.type == ValueType::Map) rawData = ValueToRawData(value);
+		if (rawData != nullptr && rawData->bytes != nullptr && rawData->length > 0) {
+			if (count <= 0) count = 1;
+			SetShaderValueV(shader, locIndex, rawData->bytes, uniformType, count);
+			return IntrinsicResult::Null;
+		}
+
+		int components = ShaderUniformComponentCount(uniformType);
+		if (IsShaderUniformFloatType(uniformType)) {
+			std::vector<float> packed;
+			PackFloatUniformData(value, components, count, packed);
+			SetShaderValueV(shader, locIndex, packed.data(), uniformType, count);
+			return IntrinsicResult::Null;
+		}
+
+		if (IsShaderUniformIntType(uniformType)) {
+			std::vector<int> packed;
+			PackIntUniformData(value, components, count, packed);
+			SetShaderValueV(shader, locIndex, packed.data(), uniformType, count);
+			return IntrinsicResult::Null;
+		}
+
+		if (IsShaderUniformUIntType(uniformType)) {
+			std::vector<unsigned int> packed;
+			PackUIntUniformData(value, components, count, packed);
+			SetShaderValueV(shader, locIndex, packed.data(), uniformType, count);
+			return IntrinsicResult::Null;
+		}
+
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("SetShaderValueV", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("shader");
+	i->code = INTRINSIC_LAMBDA {
+		Value shaderValue = context->GetVar(String("shader"));
+		Shader shader = ValueToShader(shaderValue);
+		UnloadShader(shader);
+
+		Shader* shaderPtr = GetShaderPtr(shaderValue);
+		if (shaderPtr != nullptr) {
+			delete shaderPtr;
+			ValueDict map = shaderValue.GetDict();
+			map.SetValue(String("_handle"), Value::zero);
+		}
+
+		SyncShaderValue(shaderValue, Shader{0, NULL});
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("UnloadShader", i->GetFunc());
 
 	// Timing functions
 

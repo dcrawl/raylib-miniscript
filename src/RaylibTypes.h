@@ -13,10 +13,12 @@ ValueDict MusicClass();
 ValueDict SoundClass();
 ValueDict AudioStreamClass();
 ValueDict RenderTextureClass();
+ValueDict ShaderClass();
 ValueDict MeshClass();
 ValueDict MaterialClass();
 ValueDict ModelClass();
 ValueDict ModelAnimationClass();
+ValueDict Camera3DClass();
 
 // Convert a Raylib Texture to a MiniScript map
 // Allocates the Texture on the heap and stores pointer in _handle
@@ -77,6 +79,12 @@ Value RenderTextureToValue(RenderTexture2D renderTexture);
 // Returns the RenderTexture2D by dereferencing the _handle pointer
 RenderTexture2D ValueToRenderTexture(Value value);
 
+// Convert a Raylib Shader to a MiniScript map
+Value ShaderToValue(Shader shader);
+
+// Extract a Raylib Shader from a MiniScript map
+Shader ValueToShader(Value value);
+
 // Convert a Raylib Mesh to a MiniScript map
 Value MeshToValue(Mesh mesh);
 
@@ -129,6 +137,13 @@ Vector3 ValueToVector3(Value value);
 
 // Convert a Raylib Vector3 to a MiniScript map
 Value Vector3ToValue(Vector3 vec);
+
+// Convert a MiniScript value to a Raylib Camera3D
+// Accepts a map with {position,target,up,fovy,projection}
+Camera3D ValueToCamera3D(Value value);
+
+// Convert a Raylib Camera3D to a MiniScript map
+Value Camera3DToValue(Camera3D camera);
 
 // Convert a MiniScript value to a Raylib Matrix
 // Accepts either a map with "m0".."m15" keys OR a list with 16 elements

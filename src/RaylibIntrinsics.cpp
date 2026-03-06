@@ -58,6 +58,9 @@ void AddRaylibIntrinsics() {
 	f = Intrinsic::Create("AudioStream");
 	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(AudioStreamClass()); };
 
+	f = Intrinsic::Create("Shader");
+	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(ShaderClass()); };
+
 	f = Intrinsic::Create("Mesh");
 	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(MeshClass()); };
 
@@ -69,6 +72,9 @@ void AddRaylibIntrinsics() {
 
 	f = Intrinsic::Create("ModelAnimation");
 	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(ModelAnimationClass()); };
+
+	f = Intrinsic::Create("Camera3D");
+	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(Camera3DClass()); };
 
 	// Create and register the main raylib module
 	f = Intrinsic::Create("raylib");

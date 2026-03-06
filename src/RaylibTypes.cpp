@@ -89,6 +89,15 @@ ValueDict RenderTextureClass() {
 	return map;
 }
 
+ValueDict ShaderClass() {
+	static ValueDict map;
+	if (map.Count() == 0) {
+		map.SetValue(String("_handle"), Value::zero);
+		map.SetValue(String("id"), Value::zero);
+	}
+	return map;
+}
+
 ValueDict MeshClass() {
 	static ValueDict map;
 	if (map.Count() == 0) {
@@ -131,6 +140,18 @@ ValueDict ModelAnimationClass() {
 		map.SetValue(String("_arrayHandle"), Value::zero);
 		map.SetValue(String("_arrayCount"), Value::zero);
 		map.SetValue(String("_arrayIndex"), Value::zero);
+	}
+	return map;
+}
+
+ValueDict Camera3DClass() {
+	static ValueDict map;
+	if (map.Count() == 0) {
+		map.SetValue(String("position"), Vector3ToValue(Vector3{0, 10, 10}));
+		map.SetValue(String("target"), Vector3ToValue(Vector3{0, 0, 0}));
+		map.SetValue(String("up"), Vector3ToValue(Vector3{0, 1, 0}));
+		map.SetValue(String("fovy"), Value(45.0));
+		map.SetValue(String("projection"), Value(CAMERA_PERSPECTIVE));
 	}
 	return map;
 }
@@ -377,6 +398,26 @@ RenderTexture2D ValueToRenderTexture(Value value) {
 	return *rtPtr;
 }
 
+// Convert a Raylib Shader to a MiniScript map
+Value ShaderToValue(Shader shader) {
+	Shader* shaderPtr = new Shader(shader);
+	ValueDict map;
+	map.SetValue(Value::magicIsA, ShaderClass());
+	map.SetValue(String("_handle"), Value((double)(intptr_t)shaderPtr));
+	map.SetValue(String("id"), Value((int)shader.id));
+	return Value(map);
+}
+
+// Extract a Raylib Shader from a MiniScript map
+Shader ValueToShader(Value value) {
+	if (value.type != ValueType::Map) return Shader{0, NULL};
+	ValueDict map = value.GetDict();
+	Value handleVal = map.Lookup(String("_handle"), Value::zero);
+	Shader* shaderPtr = (Shader*)ValueToPointer(handleVal);
+	if (shaderPtr == nullptr) return Shader{0, NULL};
+	return *shaderPtr;
+}
+
 // Convert a MiniScript map to a Raylib Color
 // Expects a map with "r", "g", "b", and optionally "a" keys (0-255);
 // or, a 3- or 4-element list in the order [r, g, b, a].
@@ -602,6 +643,74 @@ Value Vector3ToValue(Vector3 vec) {
 	map.SetValue(String("x"), Value(vec.x));
 	map.SetValue(String("y"), Value(vec.y));
 	map.SetValue(String("z"), Value(vec.z));
+	return Value(map);
+}
+
+Camera3D ValueToCamera3D(Value value) {
+	Camera3D camera;
+	camera.position = Vector3{0, 10, 10};
+	camera.target = Vector3{0, 0, 0};
+	camera.up = Vector3{0, 1, 0};
+	camera.fovy = 45.0f;
+	camera.projection = CAMERA_PERSPECTIVE;
+
+	if (value.type != ValueType::Map) return camera;
+
+	ValueDict map = value.GetDict();
+
+	Value positionVal = map.Lookup(String("position"), Value::null);
+	if (positionVal.type == ValueType::Map || positionVal.type == ValueType::List) {
+		camera.position = ValueToVector3(positionVal);
+	} else {
+		camera.position.x = map.Lookup(String("positionX"), Value(camera.position.x)).FloatValue();
+		camera.position.y = map.Lookup(String("positionY"), Value(camera.position.y)).FloatValue();
+		camera.position.z = map.Lookup(String("positionZ"), Value(camera.position.z)).FloatValue();
+	}
+
+	Value targetVal = map.Lookup(String("target"), Value::null);
+	if (targetVal.type == ValueType::Map || targetVal.type == ValueType::List) {
+		camera.target = ValueToVector3(targetVal);
+	} else {
+		camera.target.x = map.Lookup(String("targetX"), Value(camera.target.x)).FloatValue();
+		camera.target.y = map.Lookup(String("targetY"), Value(camera.target.y)).FloatValue();
+		camera.target.z = map.Lookup(String("targetZ"), Value(camera.target.z)).FloatValue();
+	}
+
+	Value upVal = map.Lookup(String("up"), Value::null);
+	if (upVal.type == ValueType::Map || upVal.type == ValueType::List) {
+		camera.up = ValueToVector3(upVal);
+	} else {
+		camera.up.x = map.Lookup(String("upX"), Value(camera.up.x)).FloatValue();
+		camera.up.y = map.Lookup(String("upY"), Value(camera.up.y)).FloatValue();
+		camera.up.z = map.Lookup(String("upZ"), Value(camera.up.z)).FloatValue();
+	}
+
+	camera.fovy = map.Lookup(String("fovy"), Value(camera.fovy)).FloatValue();
+	camera.projection = map.Lookup(String("projection"), Value(camera.projection)).IntValue();
+
+	return camera;
+}
+
+Value Camera3DToValue(Camera3D camera) {
+	ValueDict map;
+	map.SetValue(Value::magicIsA, Camera3DClass());
+	map.SetValue(String("position"), Vector3ToValue(camera.position));
+	map.SetValue(String("target"), Vector3ToValue(camera.target));
+	map.SetValue(String("up"), Vector3ToValue(camera.up));
+	map.SetValue(String("fovy"), Value(camera.fovy));
+	map.SetValue(String("projection"), Value(camera.projection));
+
+	// Convenience flattened fields for scripts that prefer direct scalars.
+	map.SetValue(String("positionX"), Value(camera.position.x));
+	map.SetValue(String("positionY"), Value(camera.position.y));
+	map.SetValue(String("positionZ"), Value(camera.position.z));
+	map.SetValue(String("targetX"), Value(camera.target.x));
+	map.SetValue(String("targetY"), Value(camera.target.y));
+	map.SetValue(String("targetZ"), Value(camera.target.z));
+	map.SetValue(String("upX"), Value(camera.up.x));
+	map.SetValue(String("upY"), Value(camera.up.y));
+	map.SetValue(String("upZ"), Value(camera.up.z));
+
 	return Value(map);
 }
 
