@@ -71,6 +71,403 @@ static Matrix IdentityMatrix() {
 void AddRModelsMethods(ValueDict raylibModule) {
 	Intrinsic *i;
 
+	// Basic geometric 3D drawing
+
+	i = Intrinsic::Create("");
+	i->AddParam("startPos");
+	i->AddParam("endPos");
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 startPos = ValueToVector3(context->GetVar(String("startPos")));
+		Vector3 endPos = ValueToVector3(context->GetVar(String("endPos")));
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawLine3D(startPos, endPos, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawLine3D", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawPoint3D(position, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawPoint3D", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("center");
+	i->AddParam("radius", Value(1.0));
+	i->AddParam("rotationAxis", Vector3ToValue(Vector3{0, 1, 0}));
+	i->AddParam("rotationAngle", Value::zero);
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 center = ValueToVector3(context->GetVar(String("center")));
+		float radius = context->GetVar(String("radius")).FloatValue();
+		Vector3 rotationAxis = ValueToVector3(context->GetVar(String("rotationAxis")));
+		float rotationAngle = context->GetVar(String("rotationAngle")).FloatValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCircle3D(center, radius, rotationAxis, rotationAngle, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCircle3D", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("v1");
+	i->AddParam("v2");
+	i->AddParam("v3");
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 v1 = ValueToVector3(context->GetVar(String("v1")));
+		Vector3 v2 = ValueToVector3(context->GetVar(String("v2")));
+		Vector3 v3 = ValueToVector3(context->GetVar(String("v3")));
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawTriangle3D(v1, v2, v3, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawTriangle3D", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("points");
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Value pointsValue = context->GetVar(String("points"));
+		if (pointsValue.type != ValueType::List) return IntrinsicResult::Null;
+		ValueList pointsList = pointsValue.GetList();
+		int pointCount = pointsList.Count();
+		if (pointCount < 3) return IntrinsicResult::Null;
+
+		std::vector<Vector3> points;
+		points.reserve(pointCount);
+		for (int n = 0; n < pointCount; n++) points.push_back(ValueToVector3(pointsList[n]));
+
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawTriangleStrip3D(points.data(), pointCount, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawTriangleStrip3D", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("width", Value(1.0));
+	i->AddParam("height", Value(1.0));
+	i->AddParam("length", Value(1.0));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		float width = context->GetVar(String("width")).FloatValue();
+		float height = context->GetVar(String("height")).FloatValue();
+		float length = context->GetVar(String("length")).FloatValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCube(position, width, height, length, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCube", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("size", Vector3ToValue(Vector3{1, 1, 1}));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		Vector3 size = ValueToVector3(context->GetVar(String("size")));
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCubeV(position, size, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCubeV", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("width", Value(1.0));
+	i->AddParam("height", Value(1.0));
+	i->AddParam("length", Value(1.0));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		float width = context->GetVar(String("width")).FloatValue();
+		float height = context->GetVar(String("height")).FloatValue();
+		float length = context->GetVar(String("length")).FloatValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCubeWires(position, width, height, length, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCubeWires", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("size", Vector3ToValue(Vector3{1, 1, 1}));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		Vector3 size = ValueToVector3(context->GetVar(String("size")));
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCubeWiresV(position, size, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCubeWiresV", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("centerPos");
+	i->AddParam("radius", Value(1.0));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 centerPos = ValueToVector3(context->GetVar(String("centerPos")));
+		float radius = context->GetVar(String("radius")).FloatValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawSphere(centerPos, radius, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawSphere", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("centerPos");
+	i->AddParam("radius", Value(1.0));
+	i->AddParam("rings", Value(16));
+	i->AddParam("slices", Value(16));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 centerPos = ValueToVector3(context->GetVar(String("centerPos")));
+		float radius = context->GetVar(String("radius")).FloatValue();
+		int rings = context->GetVar(String("rings")).IntValue();
+		int slices = context->GetVar(String("slices")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawSphereEx(centerPos, radius, rings, slices, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawSphereEx", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("centerPos");
+	i->AddParam("radius", Value(1.0));
+	i->AddParam("rings", Value(16));
+	i->AddParam("slices", Value(16));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 centerPos = ValueToVector3(context->GetVar(String("centerPos")));
+		float radius = context->GetVar(String("radius")).FloatValue();
+		int rings = context->GetVar(String("rings")).IntValue();
+		int slices = context->GetVar(String("slices")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawSphereWires(centerPos, radius, rings, slices, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawSphereWires", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("radiusTop", Value(1.0));
+	i->AddParam("radiusBottom", Value(1.0));
+	i->AddParam("height", Value(2.0));
+	i->AddParam("slices", Value(16));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		float radiusTop = context->GetVar(String("radiusTop")).FloatValue();
+		float radiusBottom = context->GetVar(String("radiusBottom")).FloatValue();
+		float height = context->GetVar(String("height")).FloatValue();
+		int slices = context->GetVar(String("slices")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCylinder(position, radiusTop, radiusBottom, height, slices, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCylinder", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("startPos");
+	i->AddParam("endPos");
+	i->AddParam("startRadius", Value(1.0));
+	i->AddParam("endRadius", Value(1.0));
+	i->AddParam("sides", Value(16));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 startPos = ValueToVector3(context->GetVar(String("startPos")));
+		Vector3 endPos = ValueToVector3(context->GetVar(String("endPos")));
+		float startRadius = context->GetVar(String("startRadius")).FloatValue();
+		float endRadius = context->GetVar(String("endRadius")).FloatValue();
+		int sides = context->GetVar(String("sides")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCylinderEx(startPos, endPos, startRadius, endRadius, sides, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCylinderEx", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("position");
+	i->AddParam("radiusTop", Value(1.0));
+	i->AddParam("radiusBottom", Value(1.0));
+	i->AddParam("height", Value(2.0));
+	i->AddParam("slices", Value(16));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		float radiusTop = context->GetVar(String("radiusTop")).FloatValue();
+		float radiusBottom = context->GetVar(String("radiusBottom")).FloatValue();
+		float height = context->GetVar(String("height")).FloatValue();
+		int slices = context->GetVar(String("slices")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCylinderWires(position, radiusTop, radiusBottom, height, slices, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCylinderWires", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("startPos");
+	i->AddParam("endPos");
+	i->AddParam("startRadius", Value(1.0));
+	i->AddParam("endRadius", Value(1.0));
+	i->AddParam("sides", Value(16));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 startPos = ValueToVector3(context->GetVar(String("startPos")));
+		Vector3 endPos = ValueToVector3(context->GetVar(String("endPos")));
+		float startRadius = context->GetVar(String("startRadius")).FloatValue();
+		float endRadius = context->GetVar(String("endRadius")).FloatValue();
+		int sides = context->GetVar(String("sides")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCylinderWiresEx(startPos, endPos, startRadius, endRadius, sides, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCylinderWiresEx", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("startPos");
+	i->AddParam("endPos");
+	i->AddParam("radius", Value(1.0));
+	i->AddParam("slices", Value(16));
+	i->AddParam("rings", Value(8));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 startPos = ValueToVector3(context->GetVar(String("startPos")));
+		Vector3 endPos = ValueToVector3(context->GetVar(String("endPos")));
+		float radius = context->GetVar(String("radius")).FloatValue();
+		int slices = context->GetVar(String("slices")).IntValue();
+		int rings = context->GetVar(String("rings")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCapsule(startPos, endPos, radius, slices, rings, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCapsule", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("startPos");
+	i->AddParam("endPos");
+	i->AddParam("radius", Value(1.0));
+	i->AddParam("slices", Value(16));
+	i->AddParam("rings", Value(8));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 startPos = ValueToVector3(context->GetVar(String("startPos")));
+		Vector3 endPos = ValueToVector3(context->GetVar(String("endPos")));
+		float radius = context->GetVar(String("radius")).FloatValue();
+		int slices = context->GetVar(String("slices")).IntValue();
+		int rings = context->GetVar(String("rings")).IntValue();
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawCapsuleWires(startPos, endPos, radius, slices, rings, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawCapsuleWires", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("centerPos");
+	i->AddParam("size", Vector2ToValue(Vector2{1, 1}));
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Vector3 centerPos = ValueToVector3(context->GetVar(String("centerPos")));
+		Vector2 size = ValueToVector2(context->GetVar(String("size")));
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawPlane(centerPos, size, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawPlane", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("ray");
+	i->AddParam("color", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Ray ray = ValueToRay(context->GetVar(String("ray")));
+		Color color = ValueToColor(context->GetVar(String("color")));
+		DrawRay(ray, color);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawRay", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("slices", Value(10));
+	i->AddParam("spacing", Value(1.0));
+	i->code = INTRINSIC_LAMBDA {
+		int slices = context->GetVar(String("slices")).IntValue();
+		float spacing = context->GetVar(String("spacing")).FloatValue();
+		DrawGrid(slices, spacing);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawGrid", i->GetFunc());
+
+	// Billboards
+
+	i = Intrinsic::Create("");
+	i->AddParam("camera");
+	i->AddParam("texture");
+	i->AddParam("position");
+	i->AddParam("scale", Value(1.0));
+	i->AddParam("tint", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Camera camera = ValueToCamera3D(context->GetVar(String("camera")));
+		Texture texture = ValueToTexture(context->GetVar(String("texture")));
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		float scale = context->GetVar(String("scale")).FloatValue();
+		Color tint = ValueToColor(context->GetVar(String("tint")));
+		DrawBillboard(camera, texture, position, scale, tint);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawBillboard", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("camera");
+	i->AddParam("texture");
+	i->AddParam("source");
+	i->AddParam("position");
+	i->AddParam("size", Vector2ToValue(Vector2{1, 1}));
+	i->AddParam("tint", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Camera camera = ValueToCamera3D(context->GetVar(String("camera")));
+		Texture texture = ValueToTexture(context->GetVar(String("texture")));
+		Rectangle source = ValueToRectangle(context->GetVar(String("source")));
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		Vector2 size = ValueToVector2(context->GetVar(String("size")));
+		Color tint = ValueToColor(context->GetVar(String("tint")));
+		DrawBillboardRec(camera, texture, source, position, size, tint);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawBillboardRec", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("camera");
+	i->AddParam("texture");
+	i->AddParam("source");
+	i->AddParam("position");
+	i->AddParam("up", Vector3ToValue(Vector3{0, 1, 0}));
+	i->AddParam("size", Vector2ToValue(Vector2{1, 1}));
+	i->AddParam("origin", Vector2ToValue(Vector2{0.5, 0.5}));
+	i->AddParam("rotation", Value::zero);
+	i->AddParam("tint", ColorToValue(WHITE));
+	i->code = INTRINSIC_LAMBDA {
+		Camera camera = ValueToCamera3D(context->GetVar(String("camera")));
+		Texture texture = ValueToTexture(context->GetVar(String("texture")));
+		Rectangle source = ValueToRectangle(context->GetVar(String("source")));
+		Vector3 position = ValueToVector3(context->GetVar(String("position")));
+		Vector3 up = ValueToVector3(context->GetVar(String("up")));
+		Vector2 size = ValueToVector2(context->GetVar(String("size")));
+		Vector2 origin = ValueToVector2(context->GetVar(String("origin")));
+		float rotation = context->GetVar(String("rotation")).FloatValue();
+		Color tint = ValueToColor(context->GetVar(String("tint")));
+		DrawBillboardPro(camera, texture, source, position, up, size, origin, rotation, tint);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("DrawBillboardPro", i->GetFunc());
+
 	// Model management
 
 	i = Intrinsic::Create("");

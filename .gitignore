@@ -20,3 +20,4 @@ Thumbs.db
 # Symlinks (user must create these)
 MiniScript
 raylib
+raygui
