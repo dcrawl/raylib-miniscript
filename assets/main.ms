@@ -133,8 +133,8 @@ end function
 
 // Create a button for each example
 buttons = []
-x = 480; y = 200
-dy = 80
+x = 480; y = 150
+dy = 60
 
 btn = Button.Make("Basic", x, y)
 btn.action = function
@@ -164,6 +164,22 @@ btn = Button.Make("Sounds", x, y)
 btn.action = function
 	import "sounds"
 	sounds.run
+end function
+buttons.push btn
+y += dy
+
+btn = Button.Make("3D Models", x, y)
+btn.action = function
+	import "rmodels_smoke"
+	rmodels_smoke.run
+end function
+buttons.push btn
+y += dy
+
+btn = Button.Make("Shader Demo", x, y)
+btn.action = function
+	import "shaderDemo"
+	shaderDemo.run
 end function
 buttons.push btn
 y += dy
