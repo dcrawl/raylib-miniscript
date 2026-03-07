@@ -533,6 +533,23 @@ struct RaylibCallbackBridgeState {
 
 static RaylibCallbackBridgeState g_callbackBridgeState;
 
+void ResetRaylibCallbackBridge() {
+#ifndef PLATFORM_WEB
+	SetLoadFileDataCallback(nullptr);
+	SetSaveFileDataCallback(nullptr);
+	SetLoadFileTextCallback(nullptr);
+	SetSaveFileTextCallback(nullptr);
+	SetTraceLogCallback(nullptr);
+#endif
+	g_callbackBridgeState.interpreter = nullptr;
+	g_callbackBridgeState.traceLogCallback = Value::null;
+	g_callbackBridgeState.loadFileDataCallback = Value::null;
+	g_callbackBridgeState.saveFileDataCallback = Value::null;
+	g_callbackBridgeState.loadFileTextCallback = Value::null;
+	g_callbackBridgeState.saveFileTextCallback = Value::null;
+	g_callbackBridgeState.invokingTraceLogCallback = false;
+}
+
 static bool IsFunctionOrNull(Value callback) {
 	return callback.IsNull() || callback.type == ValueType::Function;
 }
@@ -554,11 +571,17 @@ static bool InvokeMiniScriptCallback(Value callback, ValueList args, Value* outR
 	if (callback.type != ValueType::Function) return false;
 
 	Interpreter* interpreter = g_callbackBridgeState.interpreter;
-	if (interpreter == nullptr || interpreter->vm == nullptr) return false;
+	if (interpreter == nullptr || interpreter->vm == nullptr) {
+		ResetRaylibCallbackBridge();
+		return false;
+	}
 
 	Machine* vm = interpreter->vm;
 	Context* callerContext = vm->GetTopContext();
-	if (callerContext == nullptr) return false;
+	if (callerContext == nullptr) {
+		ResetRaylibCallbackBridge();
+		return false;
+	}
 
 	FunctionStorage* invoker = BuildCallbackInvoker(callback, args);
 	if (invoker == nullptr) return false;
@@ -572,6 +595,7 @@ static bool InvokeMiniScriptCallback(Value callback, ValueList args, Value* outR
 		while (vm->GetTopContext() != callerContext && !vm->yielding) vm->Step();
 		completed = (vm->GetTopContext() == callerContext);
 	} catch (...) {
+		ResetRaylibCallbackBridge();
 		completed = false;
 	}
 
