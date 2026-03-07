@@ -315,7 +315,7 @@ static IntrinsicResult intrinsic_import(Context *context, IntrinsicResult partia
 //--------------------------------------------------------------------------------
 
 void InitMiniScript() {
-	MiniScript::hostVersion = 0.1;
+	MiniScript::hostVersion = 0.2;
 	MiniScript::hostName = "raylib-miniscript";
 	MiniScript::hostInfo = "https://github.com/JoeStrout/raylib-miniscript";
 	ResetRaylibCallbackBridge();

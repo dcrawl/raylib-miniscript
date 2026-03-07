@@ -191,7 +191,6 @@ printCentered = function(s, y, fontSize=20, color)
 	//size = rl.MeasureTextEx(rl.GetFontDefault, s, fontSize, fontSize/10)
 	//rl.DrawText s, 480 - size.x/2, y, fontSize, color
 	
-	fontSize = titleFont.baseSize
 	size = rl.MeasureTextEx(titleFont, s, fontSize, 0)
 	raylib.DrawTextEx titleFont, s, [480 - size.x/2, y], fontSize, 0, color
 
@@ -242,8 +241,8 @@ while true
 	end if
 
 	// render stuff
-	printCentered "MSRLWeb Demo", 10, 30, [100,100,255,255]
-	printCentered "version " + version.host, 40, 10, [50,50,200,255]
+	printCentered "raylib-miniscript demo", 20, 48, [100,100,255,255]
+	printCentered "version " + version.host, 60, 24, [50,50,200,255]
 	for btn in buttons
 		btn.render
 	end for
