@@ -48,6 +48,7 @@ static void PrintErr(String s, bool lineBreak = true) {
 	runtimeError = s;
 	scriptState = ERRORED;
 	stackTrace = Intrinsics::StackList(interpreter->vm);
+	ResetRaylibCallbackBridge();
 	printf("%s%s", s.c_str(), lineBreak ? "\n" : "");
 }
 
@@ -317,6 +318,7 @@ void InitMiniScript() {
 	MiniScript::hostVersion = 0.1;
 	MiniScript::hostName = "raylib-miniscript";
 	MiniScript::hostInfo = "https://github.com/JoeStrout/raylib-miniscript";
+	ResetRaylibCallbackBridge();
 
 	interpreter = new Interpreter();
 	interpreter->standardOutput = &Print;
@@ -374,6 +376,7 @@ void MainLoop() {
 			} catch (MiniscriptException& mse) {
 				PrintErr("Runtime Exception: " + mse.message);
 				interpreter->vm->Stop();
+				ResetRaylibCallbackBridge();
 				scriptState = ERRORED;
 			}
 		} else {
@@ -422,6 +425,7 @@ void MainLoop() {
 //--------------------------------------------------------------------------------
 
 void CleanupMiniScript() {
+	ResetRaylibCallbackBridge();
 	if (interpreter) {
 		delete interpreter;
 		interpreter = nullptr;

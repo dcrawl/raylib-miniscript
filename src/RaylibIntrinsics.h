@@ -15,4 +15,7 @@ namespace MiniScript {
 // Add Raylib intrinsics to the global state
 void AddRaylibIntrinsics();
 
+// Clear native callback hooks and callback bridge state.
+void ResetRaylibCallbackBridge();
+
 #endif // RAYLIBINTRINSICS_H
