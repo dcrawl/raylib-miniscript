@@ -9,6 +9,7 @@
 #include "RaylibTypes.h"
 #include "RawData.h"
 #include "raylib.h"
+#include "rlgl.h"
 #include "MiniscriptInterpreter.h"
 #include "MiniscriptTypes.h"
 #include "macros.h"
@@ -2105,6 +2106,38 @@ void AddRCoreMethods(ValueDict raylibModule) {
 		return IntrinsicResult::Null;
 	};
 	raylibModule.SetValue("EndBlendMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("glSrcFactor");
+	i->AddParam("glDstFactor");
+	i->AddParam("glEquation");
+	i->code = INTRINSIC_LAMBDA {
+		int glSrcFactor = context->GetVar(String("glSrcFactor")).IntValue();
+		int glDstFactor = context->GetVar(String("glDstFactor")).IntValue();
+		int glEquation = context->GetVar(String("glEquation")).IntValue();
+		rlSetBlendFactors(glSrcFactor, glDstFactor, glEquation);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetBlendFactors", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("glSrcRGB");
+	i->AddParam("glDstRGB");
+	i->AddParam("glSrcAlpha");
+	i->AddParam("glDstAlpha");
+	i->AddParam("glEqRGB");
+	i->AddParam("glEqAlpha");
+	i->code = INTRINSIC_LAMBDA {
+		int glSrcRGB = context->GetVar(String("glSrcRGB")).IntValue();
+		int glDstRGB = context->GetVar(String("glDstRGB")).IntValue();
+		int glSrcAlpha = context->GetVar(String("glSrcAlpha")).IntValue();
+		int glDstAlpha = context->GetVar(String("glDstAlpha")).IntValue();
+		int glEqRGB = context->GetVar(String("glEqRGB")).IntValue();
+		int glEqAlpha = context->GetVar(String("glEqAlpha")).IntValue();
+		rlSetBlendFactorsSeparate(glSrcRGB, glDstRGB, glSrcAlpha, glDstAlpha, glEqRGB, glEqAlpha);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetBlendFactorsSeparate", i->GetFunc());
 
 	// Scissor mode functions
 
