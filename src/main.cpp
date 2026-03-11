@@ -440,6 +440,7 @@ int main(int argc, char *argv[]) {
 	const int screenWidth = 960;
 	const int screenHeight = 640;
 
+	SetTraceLogLevel(LOG_ERROR);
 	InitWindow(screenWidth, screenHeight, "raylib-miniscript");
 	SetTargetFPS(60);
 	InitAudioDevice();

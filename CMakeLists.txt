@@ -119,7 +119,7 @@ else()
     # Desktop build (Mac/Win/Linux)
     #---------------------------------------------------------------------------
     target_compile_options(raylib-miniscript PRIVATE
-        -O2
+        -O3
         -Wall
         -DPLATFORM_DESKTOP
         -fexceptions
