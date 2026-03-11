@@ -115,6 +115,7 @@ processBindingFile = function(path)
 		end if
 	end for
 	print "   " + apiCount + " APIs"
+	return apiCount
 end function
 
 
@@ -149,11 +150,13 @@ end for
 
 
 // Now, process each file of the form R*.cpp in our src directory
+totalAPIs = 0
 for child in file.children(bindingSrc)
 	if child[0] != "R" or child[-4:] != ".cpp" then continue
 //	if child != "RMath.cpp" then continue
-	processBindingFile file.child(bindingSrc, child)
+	totalAPIs += processBindingFile(file.child(bindingSrc, child))
 end for
+print totalAPIs + " APIs processed in total"
 
 // Finally, write the output.
 outPath = "API_DOC.md"
