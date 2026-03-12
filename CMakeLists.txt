@@ -1,8 +1,25 @@
 cmake_minimum_required(VERSION 3.12)
 project(raylib-miniscript VERSION 0.1.0 LANGUAGES C CXX)
 
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+option(ENABLE_RMLUI "Enable RmlUi integration" ON)
+
+set(HAVE_RMLUI FALSE)
+if(ENABLE_RMLUI AND NOT EMSCRIPTEN AND EXISTS ${CMAKE_SOURCE_DIR}/RmlUi/CMakeLists.txt)
+    # Keep RmlUi lean: no samples/tests/plugins for host integration builds.
+    set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
+    set(RMLUI_SAMPLES OFF CACHE BOOL "" FORCE)
+    set(BUILD_TESTING OFF CACHE BOOL "" FORCE)
+    set(RMLUI_LUA_BINDINGS OFF CACHE BOOL "" FORCE)
+    set(RMLUI_LOTTIE_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(RMLUI_SVG_PLUGIN OFF CACHE BOOL "" FORCE)
+    set(RMLUI_PRECOMPILED_HEADERS OFF CACHE BOOL "" FORCE)
+
+    add_subdirectory(${CMAKE_SOURCE_DIR}/RmlUi ${CMAKE_BINARY_DIR}/RmlUi-build EXCLUDE_FROM_ALL)
+    set(HAVE_RMLUI TRUE)
+endif()
 
 # MiniScript source files
 set(MINISCRIPT_SOURCES
@@ -28,6 +45,7 @@ set(APP_SOURCES
     src/main.cpp
     src/loadfile.cpp
     src/RaylibIntrinsics.cpp
+    src/RRmlUi.cpp
     src/RaylibTypes.cpp
     src/RawData.cpp
     src/RAudio.cpp
@@ -52,6 +70,11 @@ target_include_directories(raylib-miniscript PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${CMAKE_SOURCE_DIR}/MiniScript
 )
+
+if(HAVE_RMLUI)
+    target_include_directories(raylib-miniscript PRIVATE ${CMAKE_SOURCE_DIR}/RmlUi/Include)
+    target_compile_definitions(raylib-miniscript PRIVATE HAVE_RMLUI=1)
+endif()
 
 if(EMSCRIPTEN)
     #---------------------------------------------------------------------------
@@ -144,6 +167,15 @@ else()
                 "  1. Build raylib for desktop: cd raylib/src && make\n"
                 "  2. Install raylib system-wide")
         endif()
+    endif()
+
+    if(HAVE_RMLUI)
+        target_link_libraries(raylib-miniscript rmlui_core)
+        message(STATUS "RmlUi integration: enabled")
+    elseif(ENABLE_RMLUI)
+        message(STATUS "RmlUi integration: requested but unavailable (missing RmlUi source tree)")
+    else()
+        message(STATUS "RmlUi integration: disabled")
     endif()
 
     # Platform-specific libraries

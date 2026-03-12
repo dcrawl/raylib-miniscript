@@ -11,6 +11,7 @@ Generated from intrinsic registrations in src/RAudio.cpp, src/RCore.cpp, src/RMa
 ## Global Accessor Callables
 
 - raylib() -> returns the main module object used as raylib.*
+- ui() -> returns the RmlUi module object used as ui.*
 - RawData()
 - Image()
 - Texture()

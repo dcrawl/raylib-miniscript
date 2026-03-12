@@ -17,6 +17,8 @@ fi
 
 echo "Building raylib-miniscript (desktop)..."
 
+RMLUI_CMAKE_FLAG="-DENABLE_RMLUI=ON"
+
 # Check for symlinks
 if [ ! -e "MiniScript" ]; then
     echo -e "${RED}Error: MiniScript symlink not found!${NC}"
@@ -32,11 +34,18 @@ if [ ! -e "raylib" ]; then
     exit 1
 fi
 
+if [ ! -e "RmlUi" ]; then
+    echo -e "${YELLOW}Warning: RmlUi symlink not found; building without RmlUi integration.${NC}"
+    echo "Create a symlink to your RmlUi source to enable UI support:"
+    echo "  ln -s /path/to/RmlUi RmlUi"
+    RMLUI_CMAKE_FLAG="-DENABLE_RMLUI=OFF"
+fi
+
 mkdir -p build
 cd build
 
 echo -e "${YELLOW}Configuring with CMake...${NC}"
-cmake .. -DCMAKE_BUILD_TYPE=Release
+cmake .. -DCMAKE_BUILD_TYPE=Release ${RMLUI_CMAKE_FLAG}
 
 if [ $? -ne 0 ]; then
     echo -e "${RED}CMake configuration failed!${NC}"

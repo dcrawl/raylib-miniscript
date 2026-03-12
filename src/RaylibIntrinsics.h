@@ -18,4 +18,7 @@ void AddRaylibIntrinsics();
 // Clear native callback hooks and callback bridge state.
 void ResetRaylibCallbackBridge();
 
+// Shutdown and clear RmlUi bridge state.
+void ResetRmlUiBridge();
+
 #endif // RAYLIBINTRINSICS_H

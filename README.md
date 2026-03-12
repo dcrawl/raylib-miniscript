@@ -19,3 +19,24 @@ ln -s ../miniscript/MiniScript-cpp/src/MiniScript MiniScript
 5. Build raylib-miniscript with `scripts/build-desktop.sh`
 6. Run with `build/miniscript-raylib`.  This will look for `assets/main.ms`, unless you specify some other script file for it to launch.
 
+### Optional: Enable RmlUi Integration
+
+RmlUi support is optional and enabled automatically on desktop builds when an `RmlUi` source tree is present.
+
+1. Clone RmlUi:
+```
+git clone https://github.com/mikke89/RmlUi
+```
+2. Symlink it into this repo root:
+```
+ln -s /path/to/RmlUi RmlUi
+```
+3. Rebuild with `scripts/build-desktop.sh`.
+
+You can run the initial integration smoke script with:
+```
+./build/raylib-miniscript assets/rmlui_smoke.ms
+```
+
+When enabled, the RmlUi bindings are available through the `ui` module in MiniScript (for example, `ui.RmlUiCreateContext(...)`).
+

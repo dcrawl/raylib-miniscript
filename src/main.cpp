@@ -319,6 +319,7 @@ void InitMiniScript() {
 	MiniScript::hostName = "raylib-miniscript";
 	MiniScript::hostInfo = "https://github.com/JoeStrout/raylib-miniscript";
 	ResetRaylibCallbackBridge();
+	ResetRmlUiBridge();
 
 	interpreter = new Interpreter();
 	interpreter->standardOutput = &Print;
@@ -377,6 +378,7 @@ void MainLoop() {
 				PrintErr("Runtime Exception: " + mse.message);
 				interpreter->vm->Stop();
 				ResetRaylibCallbackBridge();
+				ResetRmlUiBridge();
 				scriptState = ERRORED;
 			}
 		} else {
@@ -426,6 +428,7 @@ void MainLoop() {
 
 void CleanupMiniScript() {
 	ResetRaylibCallbackBridge();
+	ResetRmlUiBridge();
 	if (interpreter) {
 		delete interpreter;
 		interpreter = nullptr;

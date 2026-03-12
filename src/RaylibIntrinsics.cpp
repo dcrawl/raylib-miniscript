@@ -21,6 +21,7 @@ using namespace MiniScript;
 // Helper methods, one per Raylib module (each defined in its own .cpp file)
 void AddRAudioMethods(ValueDict raylibModule);
 void AddRCoreMethods(ValueDict raylibModule);
+void AddRRmlUiMethods(ValueDict raylibModule);
 void AddRModelsMethods(ValueDict raylibModule);
 void AddRMathMethods(ValueDict raylibModule);
 void AddRShapesMethods(ValueDict raylibModule);
@@ -94,5 +95,17 @@ void AddRaylibIntrinsics() {
 		}
 
 		return IntrinsicResult(raylibModule);
+	};
+
+	// Create and register a dedicated RmlUi module.
+	f = Intrinsic::Create("ui");
+	f->code = INTRINSIC_LAMBDA {
+		static ValueDict uiModule;
+
+		if (uiModule.Count() == 0) {
+			AddRRmlUiMethods(uiModule);
+		}
+
+		return IntrinsicResult(uiModule);
 	};
 }
