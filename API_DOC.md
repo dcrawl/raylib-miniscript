@@ -640,6 +640,23 @@
 |rlSetClipPlanes |**nearPlane**, **farPlane** |Set clip planes distances |
 |rlGetCullDistanceNear | |Get cull plane distance near |
 |rlGetCullDistanceFar | |Get cull plane distance far |
+|rlEnableBackfaceCulling | | |
+|rlDisableBackfaceCulling | | |
+|rlEnableDepthTest | | |
+|rlDisableDepthTest | | |
+|rlEnableDepthMask | | |
+|rlDisableDepthMask | | |
+|rlEnableWireMode | |Enable wire mode |
+|rlDisableWireMode | |Disable wire mode |
+|rlEnableSmoothLines | |Enable line aliasing |
+|rlDisableSmoothLines | |Disable line aliasing |
+|rlSetLineWidth |**width**=1 | |
+|rlGetLineWidth | |Get the line drawing width |
+|rlDrawRenderBatchActive | |Update and draw internal render batch |
+|rlGetMatrixModelview | |Get internal modelview matrix |
+|rlGetMatrixProjection | |Get internal projection matrix |
+|rlSetMatrixProjection |**proj** |Set a custom projection matrix (replaces internal projection matrix) |
+|rlSetMatrixModelview |**view** |Set a custom modelview matrix (replaces internal modelview matrix) |
 |BeginScissorMode |**x**, **y**, **width**, **height** |Begin scissor mode (define screen area for following drawing) NOTE: Scissor rec refers to bottom-left corner, changing it to upper-left |
 |EndScissorMode | |End scissor mode |
 |BeginVrStereoMode |**config** |Begin VR drawing configuration |

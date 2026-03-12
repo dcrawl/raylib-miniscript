@@ -2302,6 +2302,134 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	};
 	raylibModule.SetValue("rlGetCullDistanceFar", i->GetFunc());
 
+	// Render state toggles (rlgl)
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableBackfaceCulling();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableBackfaceCulling", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableBackfaceCulling();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableBackfaceCulling", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableDepthTest();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableDepthTest", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableDepthTest();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableDepthTest", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableDepthMask();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableDepthMask", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableDepthMask();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableDepthMask", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableWireMode();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableWireMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableWireMode();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableWireMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableSmoothLines();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableSmoothLines", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableSmoothLines();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableSmoothLines", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("width", Value(1));
+	i->code = INTRINSIC_LAMBDA {
+		float width = context->GetVar(String("width")).FloatValue();
+		rlSetLineWidth(width);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetLineWidth", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(Value(rlGetLineWidth()));
+	};
+	raylibModule.SetValue("rlGetLineWidth", i->GetFunc());
+
+	// Render batch (rlgl)
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDrawRenderBatchActive();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDrawRenderBatchActive", i->GetFunc());
+
+	// Get/set matrices (rlgl)
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(MatrixToValue(rlGetMatrixModelview()));
+	};
+	raylibModule.SetValue("rlGetMatrixModelview", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(MatrixToValue(rlGetMatrixProjection()));
+	};
+	raylibModule.SetValue("rlGetMatrixProjection", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("proj");
+	i->code = INTRINSIC_LAMBDA {
+		Matrix proj = ValueToMatrix(context->GetVar(String("proj")));
+		rlSetMatrixProjection(proj);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetMatrixProjection", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("view");
+	i->code = INTRINSIC_LAMBDA {
+		Matrix view = ValueToMatrix(context->GetVar(String("view")));
+		rlSetMatrixModelview(view);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetMatrixModelview", i->GetFunc());
+
 	// Scissor mode functions
 
 	i = Intrinsic::Create("");
