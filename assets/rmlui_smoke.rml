@@ -1,0 +1,118 @@
+<rml>
+<head>
+	<style>
+		body {
+			width: 100%;
+			height: 100%;
+			font-family: "EquipmentPro";
+			font-size: 16px;
+			line-height: 16px;
+			color: #f2f4ff;
+		}
+
+		#panel {
+			position: absolute;
+			left: 48px;
+			top: 48px;
+			width: 860px;
+			padding: 18px;
+			background-color: #10172acc;
+			border: 2px #5b8cff;
+			border-radius: 10px;
+		}
+
+		#title {
+			margin-bottom: 14px;
+			font-size: 24px;
+			line-height: 24px;
+			color: #c8d8ff;
+		}
+
+		#subtitle {
+			margin-bottom: 12px;
+			color: #a9b8e8;
+			font-size: 14px;
+			line-height: 14px;
+		}
+
+		.ladder {
+			margin-top: 6px;
+			padding: 8px 10px;
+			border: 1px #3d4f86;
+			border-radius: 6px;
+			background-color: #0a112380;
+		}
+
+		.label {
+			display: block;
+			margin-bottom: 4px;
+			color: #98a9df;
+		}
+
+		.s12 { font-size: 12px; line-height: 12px; }
+		.s14 { font-size: 14px; line-height: 14px; }
+		.s16 { font-size: 16px; line-height: 16px; }
+		.s18 { font-size: 18px; line-height: 18px; }
+		.s20 { font-size: 20px; line-height: 20px; }
+		.s24 { font-size: 24px; line-height: 24px; }
+
+		.sample {
+			display: block;
+			color: #f2f4ff;
+		}
+
+		#btn {
+			margin-top: 12px;
+			padding: 10px 14px;
+			background-color: #3556cc;
+			border: 1px #9fb5ff;
+			border-radius: 6px;
+			color: #ffffff;
+			font-size: 14px;
+			line-height: 14px;
+		}
+
+		#btn:hover {
+			background-color: #4d71ee;
+		}
+	</style>
+</head>
+<body>
+	<div id="panel">
+		<div id="title">RmlUi Bitmap Font Size Ladder</div>
+		<div id="subtitle">Pick the sharpest row for your designed strike size. Each row uses font-size = line-height.</div>
+
+		<div class="ladder s12">
+			<span class="label">12px / 12px</span>
+			<span class="sample">Sphinx of black quartz, judge my vow. 0123456789</span>
+		</div>
+
+		<div class="ladder s14">
+			<span class="label">14px / 14px</span>
+			<span class="sample">Sphinx of black quartz, judge my vow. 0123456789</span>
+		</div>
+
+		<div class="ladder s16">
+			<span class="label">16px / 16px</span>
+			<span class="sample">Sphinx of black quartz, judge my vow. 0123456789</span>
+		</div>
+
+		<div class="ladder s18">
+			<span class="label">18px / 18px</span>
+			<span class="sample">Sphinx of black quartz, judge my vow. 0123456789</span>
+		</div>
+
+		<div class="ladder s20">
+			<span class="label">20px / 20px</span>
+			<span class="sample">Sphinx of black quartz, judge my vow. 0123456789</span>
+		</div>
+
+		<div class="ladder s24">
+			<span class="label">24px / 24px</span>
+			<span class="sample">Sphinx of black quartz, judge my vow. 0123456789</span>
+		</div>
+
+		<button id="btn">Click Me</button>
+	</div>
+</body>
+</rml>
