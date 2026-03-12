@@ -9,6 +9,7 @@
 #include "RaylibTypes.h"
 #include "raylib.h"
 #include "raymath.h"
+#include "rlgl.h"
 #include "MiniscriptTypes.h"
 
 using namespace MiniScript;
@@ -319,6 +320,10 @@ void AddConstants(ValueDict raylibModule) {
 	raylibModule.SetValue("LOG_ERROR", Value(LOG_ERROR));
 	raylibModule.SetValue("LOG_FATAL", Value(LOG_FATAL));
 	raylibModule.SetValue("LOG_NONE", Value(LOG_NONE));
+
+	// rlgl matrix mode constants
+	raylibModule.SetValue("RL_MODELVIEW", Value(RL_MODELVIEW));
+	raylibModule.SetValue("RL_PROJECTION", Value(RL_PROJECTION));
 
 	// Add raymath constants
 	raylibModule.SetValue("PI", Value(PI));

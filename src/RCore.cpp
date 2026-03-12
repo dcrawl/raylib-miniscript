@@ -9,6 +9,7 @@
 #include "RaylibTypes.h"
 #include "RawData.h"
 #include "raylib.h"
+#include "rlgl.h"
 #include "MiniscriptInterpreter.h"
 #include "MiniscriptTypes.h"
 #include "macros.h"
@@ -2105,6 +2106,329 @@ void AddRCoreMethods(ValueDict raylibModule) {
 		return IntrinsicResult::Null;
 	};
 	raylibModule.SetValue("EndBlendMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("glSrcFactor");
+	i->AddParam("glDstFactor");
+	i->AddParam("glEquation");
+	i->code = INTRINSIC_LAMBDA {
+		int glSrcFactor = context->GetVar(String("glSrcFactor")).IntValue();
+		int glDstFactor = context->GetVar(String("glDstFactor")).IntValue();
+		int glEquation = context->GetVar(String("glEquation")).IntValue();
+		rlSetBlendFactors(glSrcFactor, glDstFactor, glEquation);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetBlendFactors", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("glSrcRGB");
+	i->AddParam("glDstRGB");
+	i->AddParam("glSrcAlpha");
+	i->AddParam("glDstAlpha");
+	i->AddParam("glEqRGB");
+	i->AddParam("glEqAlpha");
+	i->code = INTRINSIC_LAMBDA {
+		int glSrcRGB = context->GetVar(String("glSrcRGB")).IntValue();
+		int glDstRGB = context->GetVar(String("glDstRGB")).IntValue();
+		int glSrcAlpha = context->GetVar(String("glSrcAlpha")).IntValue();
+		int glDstAlpha = context->GetVar(String("glDstAlpha")).IntValue();
+		int glEqRGB = context->GetVar(String("glEqRGB")).IntValue();
+		int glEqAlpha = context->GetVar(String("glEqAlpha")).IntValue();
+		rlSetBlendFactorsSeparate(glSrcRGB, glDstRGB, glSrcAlpha, glDstAlpha, glEqRGB, glEqAlpha);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetBlendFactorsSeparate", i->GetFunc());
+
+	// Matrix operations (rlgl)
+
+	i = Intrinsic::Create("");
+	i->AddParam("mode");
+	i->code = INTRINSIC_LAMBDA {
+		int mode = context->GetVar(String("mode")).IntValue();
+		rlMatrixMode(mode);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlMatrixMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlPushMatrix();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlPushMatrix", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlPopMatrix();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlPopMatrix", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlLoadIdentity();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlLoadIdentity", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("x", Value::zero);
+	i->AddParam("y", Value::zero);
+	i->AddParam("z", Value::zero);
+	i->code = INTRINSIC_LAMBDA {
+		float x = context->GetVar(String("x")).FloatValue();
+		float y = context->GetVar(String("y")).FloatValue();
+		float z = context->GetVar(String("z")).FloatValue();
+		rlTranslatef(x, y, z);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlTranslatef", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("angle", Value::zero);
+	i->AddParam("x", Value::zero);
+	i->AddParam("y", Value::zero);
+	i->AddParam("z", Value::zero);
+	i->code = INTRINSIC_LAMBDA {
+		float angle = context->GetVar(String("angle")).FloatValue();
+		float x = context->GetVar(String("x")).FloatValue();
+		float y = context->GetVar(String("y")).FloatValue();
+		float z = context->GetVar(String("z")).FloatValue();
+		rlRotatef(angle, x, y, z);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlRotatef", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("x", Value(1));
+	i->AddParam("y", Value(1));
+	i->AddParam("z", Value(1));
+	i->code = INTRINSIC_LAMBDA {
+		float x = context->GetVar(String("x")).FloatValue();
+		float y = context->GetVar(String("y")).FloatValue();
+		float z = context->GetVar(String("z")).FloatValue();
+		rlScalef(x, y, z);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlScalef", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("matf");
+	i->code = INTRINSIC_LAMBDA {
+		Value listVal = context->GetVar(String("matf"));
+		ValueList list = listVal.GetList();
+		float matf[16];
+		for (int j = 0; j < 16; j++) {
+			matf[j] = (j < list.Count()) ? list[j].FloatValue() : 0.0f;
+		}
+		rlMultMatrixf(matf);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlMultMatrixf", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("left");
+	i->AddParam("right");
+	i->AddParam("bottom");
+	i->AddParam("top");
+	i->AddParam("znear");
+	i->AddParam("zfar");
+	i->code = INTRINSIC_LAMBDA {
+		double left = context->GetVar(String("left")).FloatValue();
+		double right = context->GetVar(String("right")).FloatValue();
+		double bottom = context->GetVar(String("bottom")).FloatValue();
+		double top = context->GetVar(String("top")).FloatValue();
+		double znear = context->GetVar(String("znear")).FloatValue();
+		double zfar = context->GetVar(String("zfar")).FloatValue();
+		rlFrustum(left, right, bottom, top, znear, zfar);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlFrustum", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("left");
+	i->AddParam("right");
+	i->AddParam("bottom");
+	i->AddParam("top");
+	i->AddParam("znear");
+	i->AddParam("zfar");
+	i->code = INTRINSIC_LAMBDA {
+		double left = context->GetVar(String("left")).FloatValue();
+		double right = context->GetVar(String("right")).FloatValue();
+		double bottom = context->GetVar(String("bottom")).FloatValue();
+		double top = context->GetVar(String("top")).FloatValue();
+		double znear = context->GetVar(String("znear")).FloatValue();
+		double zfar = context->GetVar(String("zfar")).FloatValue();
+		rlOrtho(left, right, bottom, top, znear, zfar);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlOrtho", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("x");
+	i->AddParam("y");
+	i->AddParam("width");
+	i->AddParam("height");
+	i->code = INTRINSIC_LAMBDA {
+		int x = context->GetVar(String("x")).IntValue();
+		int y = context->GetVar(String("y")).IntValue();
+		int width = context->GetVar(String("width")).IntValue();
+		int height = context->GetVar(String("height")).IntValue();
+		rlViewport(x, y, width, height);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlViewport", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("nearPlane");
+	i->AddParam("farPlane");
+	i->code = INTRINSIC_LAMBDA {
+		double nearPlane = context->GetVar(String("nearPlane")).FloatValue();
+		double farPlane = context->GetVar(String("farPlane")).FloatValue();
+		rlSetClipPlanes(nearPlane, farPlane);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetClipPlanes", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(Value(rlGetCullDistanceNear()));
+	};
+	raylibModule.SetValue("rlGetCullDistanceNear", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(Value(rlGetCullDistanceFar()));
+	};
+	raylibModule.SetValue("rlGetCullDistanceFar", i->GetFunc());
+
+	// Render state toggles (rlgl)
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableBackfaceCulling();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableBackfaceCulling", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableBackfaceCulling();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableBackfaceCulling", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableDepthTest();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableDepthTest", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableDepthTest();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableDepthTest", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableDepthMask();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableDepthMask", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableDepthMask();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableDepthMask", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableWireMode();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableWireMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableWireMode();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableWireMode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlEnableSmoothLines();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlEnableSmoothLines", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDisableSmoothLines();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDisableSmoothLines", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("width", Value(1));
+	i->code = INTRINSIC_LAMBDA {
+		float width = context->GetVar(String("width")).FloatValue();
+		rlSetLineWidth(width);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetLineWidth", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(Value(rlGetLineWidth()));
+	};
+	raylibModule.SetValue("rlGetLineWidth", i->GetFunc());
+
+	// Render batch (rlgl)
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		rlDrawRenderBatchActive();
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlDrawRenderBatchActive", i->GetFunc());
+
+	// Get/set matrices (rlgl)
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(MatrixToValue(rlGetMatrixModelview()));
+	};
+	raylibModule.SetValue("rlGetMatrixModelview", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		return IntrinsicResult(MatrixToValue(rlGetMatrixProjection()));
+	};
+	raylibModule.SetValue("rlGetMatrixProjection", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("proj");
+	i->code = INTRINSIC_LAMBDA {
+		Matrix proj = ValueToMatrix(context->GetVar(String("proj")));
+		rlSetMatrixProjection(proj);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetMatrixProjection", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("view");
+	i->code = INTRINSIC_LAMBDA {
+		Matrix view = ValueToMatrix(context->GetVar(String("view")));
+		rlSetMatrixModelview(view);
+		return IntrinsicResult::Null;
+	};
+	raylibModule.SetValue("rlSetMatrixModelview", i->GetFunc());
 
 	// Scissor mode functions
 

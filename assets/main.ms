@@ -133,8 +133,8 @@ end function
 
 // Create a button for each example
 buttons = []
-x = 480; y = 200
-dy = 80
+x = 480; y = 150
+dy = 60
 
 btn = Button.Make("Basic", x, y)
 btn.action = function
@@ -168,6 +168,22 @@ end function
 buttons.push btn
 y += dy
 
+btn = Button.Make("3D Models", x, y)
+btn.action = function
+	import "rmodels_smoke"
+	rmodels_smoke.run
+end function
+buttons.push btn
+y += dy
+
+btn = Button.Make("Shader Demo", x, y)
+btn.action = function
+	import "shaderDemo"
+	shaderDemo.run
+end function
+buttons.push btn
+y += dy
+
 printCentered = function(s, y, fontSize=20, color)
 	if color == null then color = rl.WHITE
 	// DrawText uses a spacing equal to fontSize/10, so measure as:
@@ -175,11 +191,32 @@ printCentered = function(s, y, fontSize=20, color)
 	//size = rl.MeasureTextEx(rl.GetFontDefault, s, fontSize, fontSize/10)
 	//rl.DrawText s, 480 - size.x/2, y, fontSize, color
 	
-	fontSize = titleFont.baseSize
 	size = rl.MeasureTextEx(titleFont, s, fontSize, 0)
 	raylib.DrawTextEx titleFont, s, [480 - size.x/2, y], fontSize, 0, color
 
 end function
+
+// Load fire background shader
+fireShader = null
+fireQuadTex = null
+fragCode = rl.LoadFileText("assets/shaders/fireShader.fs")
+if fragCode != "" then
+	fireShader = rl.LoadShaderFromMemory("", fragCode)
+	if fireShader != null and rl.IsShaderValid(fireShader) then
+		globals.fireLocTime = rl.GetShaderLocation(fireShader, "uTime")
+		screenW = rl.GetScreenWidth
+		screenH = rl.GetScreenHeight
+		fireImg = rl.GenImageColor(screenW, screenH, rl.WHITE)
+		fireQuadTex = rl.LoadTextureFromImage(fireImg)
+		rl.UnloadImage fireImg
+		print "Fire shader loaded, locTime=" + fireLocTime
+	else
+		print "Fire shader failed to compile"
+		fireShader = null
+	end if
+else
+	print "Could not load fireShader.fs"
+end if
 
 // Main loop
 while true
@@ -190,11 +227,22 @@ while true
 	updateMouse
 	for btn in buttons
 		btn.update
-	end for	
-	
+	end for
+
+	// render fire background
+	if fireShader then
+		t = rl.GetTime
+		if fireLocTime >= 0 then
+			rl.SetShaderValue fireShader, fireLocTime, t, rl.SHADER_UNIFORM_FLOAT
+		end if
+		rl.BeginShaderMode fireShader
+		rl.DrawTexture fireQuadTex, 0, 0, rl.WHITE
+		rl.EndShaderMode
+	end if
+
 	// render stuff
-	printCentered "MSRLWeb Demo", 10, 30, [100,100,255,255]
-	printCentered "version " + version.host, 40, 10, [50,50,200,255]
+	printCentered "raylib-miniscript demo", 20, 48, [100,100,255,255]
+	printCentered "version " + version.host, 60, 24, [50,50,200,255]
 	for btn in buttons
 		btn.render
 	end for

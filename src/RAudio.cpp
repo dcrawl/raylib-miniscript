@@ -74,9 +74,13 @@ void AddRAudioMethods(ValueDict raylibModule) {
 	i->AddParam("dataSize");
 	i->code = INTRINSIC_LAMBDA {
 		String fileType = context->GetVar(String("fileType")).ToString();
-		// Note: This would need a byte array type in MiniScript to be fully useful
-		// For now, we'll skip implementing this
-		return IntrinsicResult::Null;
+		BinaryData* data = ValueToRawData(context->GetVar(String("fileData")));
+		if (!data) return IntrinsicResult::Null;
+		int dataSize = context->GetVar(String("dataSize")).IntValue();
+		if (dataSize <= 0 || dataSize > data->length) dataSize = data->length;
+		Wave wave = LoadWaveFromMemory(fileType.c_str(), data->bytes, dataSize);
+		if (!IsWaveValid(wave)) return IntrinsicResult::Null;
+		return IntrinsicResult(WaveToValue(wave));
 	};
 	raylibModule.SetValue("LoadWaveFromMemory", i->GetFunc());
 
