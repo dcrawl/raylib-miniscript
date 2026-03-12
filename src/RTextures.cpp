@@ -1067,6 +1067,40 @@ void AddRTexturesMethods(ValueDict raylibModule) {
 
 	i = Intrinsic::Create("");
 	i->AddParam("image");
+	i->AddParam("fileName");
+	i->code = INTRINSIC_LAMBDA {
+		Image img = ValueToImage(context->GetVar(String("image")));
+		String path = context->GetVar(String("fileName")).ToString();
+		return IntrinsicResult(ExportImage(img, path.c_str()));
+	};
+	raylibModule.SetValue("ExportImage", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("image");
+	i->AddParam("fileType");
+	i->code = INTRINSIC_LAMBDA {
+		Image img = ValueToImage(context->GetVar(String("image")));
+		String fileType = context->GetVar(String("fileType")).ToString();
+		int dataSize = 0;
+		unsigned char* data = ExportImageToMemory(img, fileType.c_str(), &dataSize);
+		if (!data) return IntrinsicResult::Null;
+		BinaryData* bd = new BinaryData(data, dataSize, true);
+		return IntrinsicResult(RawDataToValue(bd));
+	};
+	raylibModule.SetValue("ExportImageToMemory", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("image");
+	i->AddParam("fileName");
+	i->code = INTRINSIC_LAMBDA {
+		Image img = ValueToImage(context->GetVar(String("image")));
+		String path = context->GetVar(String("fileName")).ToString();
+		return IntrinsicResult(ExportImageAsCode(img, path.c_str()));
+	};
+	raylibModule.SetValue("ExportImageAsCode", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("image");
 	i->AddParam("colorCount");
 	i->code = INTRINSIC_LAMBDA {
 		Image image = ValueToImage(context->GetVar(String("image")));
