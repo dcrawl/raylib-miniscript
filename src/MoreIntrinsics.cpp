@@ -7,6 +7,7 @@
 
 #include "MoreIntrinsics.h"
 #include "raylib.h"
+#include "MiniscriptInterpreter.h"
 #include "MiniscriptIntrinsics.h"
 #include "MiniscriptParser.h"
 #include <map>
@@ -377,6 +378,152 @@ static IntrinsicResult intrinsic_exit(Context *context, IntrinsicResult partialR
 }
 
 //--------------------------------------------------------------------------------
+// Script loading helpers (shared by main.cpp and the run intrinsic)
+//--------------------------------------------------------------------------------
+
+void UpdateScriptDir(const char* path) {
+	const char* lastSlash = strrchr(path, '/');
+#ifdef _WIN32
+	const char* lastBackslash = strrchr(path, '\\');
+	if (lastBackslash && (!lastSlash || lastBackslash > lastSlash)) lastSlash = lastBackslash;
+#endif
+	if (lastSlash) {
+		String scriptDir(path, (long)(lastSlash - path));
+		setEnvVar("MS_SCRIPT_DIR", scriptDir.c_str());
+	} else {
+		setEnvVar("MS_SCRIPT_DIR", ".");
+	}
+}
+
+void RunScriptSource(Interpreter* interpreter, String source) {
+	// Save the current global variables
+	ValueDict savedGlobals = interpreter->vm->GetGlobalContext()->variables;
+
+	// Reset and recompile with the new source
+	interpreter->Reset(source);
+	interpreter->Compile();
+
+	// Restore the saved globals into the new VM
+	if (interpreter->vm) {
+		interpreter->vm->GetGlobalContext()->variables = savedGlobals;
+	}
+}
+
+//--------------------------------------------------------------------------------
+// Run intrinsic
+//--------------------------------------------------------------------------------
+
+#ifdef PLATFORM_WEB
+
+struct RunFetchData {
+	emscripten_fetch_t* fetch;
+	bool completed;
+	int status;
+	String path;
+	RunFetchData() : fetch(nullptr), completed(false), status(0) {}
+};
+
+static std::map<long, RunFetchData> activeRunFetches;
+static long nextRunFetchId = 1;
+
+static void run_fetch_completed(emscripten_fetch_t *fetch) {
+	for (auto& pair : activeRunFetches) {
+		if (pair.second.fetch == fetch) {
+			pair.second.completed = true;
+			pair.second.status = fetch->status;
+			break;
+		}
+	}
+}
+
+static IntrinsicResult intrinsic_run(Context *context, IntrinsicResult partialResult) {
+	// State 2: File has been fetched, run it
+	if (!partialResult.Done() && partialResult.Result().type == ValueType::Number) {
+		long fetchId = (long)partialResult.Result().DoubleValue();
+		auto it = activeRunFetches.find(fetchId);
+		if (it == activeRunFetches.end()) {
+			RuntimeException("run: internal error (fetch not found)").raise();
+		}
+
+		RunFetchData& data = it->second;
+
+		if (!data.completed) {
+			return partialResult;
+		}
+
+		emscripten_fetch_t* fetch = data.fetch;
+		String path = data.path;
+
+		if (data.status == 200) {
+			char* fileData = (char*)malloc(fetch->numBytes + 1);
+			if (!fileData) {
+				emscripten_fetch_close(fetch);
+				activeRunFetches.erase(it);
+				RuntimeException("run: memory allocation failed").raise();
+			}
+			memcpy(fileData, fetch->data, fetch->numBytes);
+			fileData[fetch->numBytes] = '\0';
+			String source(fileData);
+			free(fileData);
+
+			emscripten_fetch_close(fetch);
+			activeRunFetches.erase(it);
+
+			UpdateScriptDir(path.c_str());
+			RunScriptSource(context->vm->interpreter, source);
+			return IntrinsicResult::Null;
+		} else {
+			emscripten_fetch_close(fetch);
+			activeRunFetches.erase(it);
+			RuntimeException("run: failed to load file: " + path).raise();
+		}
+	}
+
+	// State 1: Start the fetch
+	String path = context->GetVar("path").ToString();
+	if (path.empty()) {
+		RuntimeException("run: path required").raise();
+	}
+
+	long fetchId = nextRunFetchId++;
+	RunFetchData& data = activeRunFetches[fetchId];
+	data.path = path;
+
+	emscripten_fetch_attr_t attr;
+	emscripten_fetch_attr_init(&attr);
+	strcpy(attr.requestMethod, "GET");
+	attr.attributes = EMSCRIPTEN_FETCH_LOAD_TO_MEMORY;
+	attr.onsuccess = run_fetch_completed;
+	attr.onerror = run_fetch_completed;
+
+	data.fetch = emscripten_fetch(&attr, path.c_str());
+
+	return IntrinsicResult(Value((double)fetchId), false);
+}
+
+#else // PLATFORM_DESKTOP
+
+static IntrinsicResult intrinsic_run(Context *context, IntrinsicResult partialResult) {
+	String path = context->GetVar("path").ToString();
+	if (path.empty()) {
+		RuntimeException("run: path required").raise();
+	}
+
+	char* text = LoadFileText(path.c_str());
+	if (text == nullptr) {
+		RuntimeException("run: failed to load file: " + path).raise();
+	}
+	String source(text);
+	UnloadFileText(text);
+
+	UpdateScriptDir(path.c_str());
+	RunScriptSource(context->vm->interpreter, source);
+	return IntrinsicResult::Null;
+}
+
+#endif
+
+//--------------------------------------------------------------------------------
 // Public API
 //--------------------------------------------------------------------------------
 
@@ -391,6 +538,10 @@ void AddMoreIntrinsics() {
 
 	Intrinsic *envFunc = Intrinsic::Create("env");
 	envFunc->code = &intrinsic_env;
+
+	Intrinsic *runFunc = Intrinsic::Create("run");
+	runFunc->AddParam("path", "");
+	runFunc->code = &intrinsic_run;
 
 #ifdef PLATFORM_WEB
 	// On web, set default path variables (on desktop, these are set in main.cpp)

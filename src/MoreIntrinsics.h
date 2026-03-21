@@ -2,13 +2,17 @@
 //  MoreIntrinsics.h
 //  raylib-miniscript
 //
-//  Additional intrinsics (import, exit) for the MiniScript environment.
+//  Additional intrinsics (import, exit, env, run) for the MiniScript environment.
 //
 
 #ifndef MOREINTRINSICS_H
 #define MOREINTRINSICS_H
 
-/// Add the import and exit intrinsics to the MiniScript environment.
+#include "SimpleString.h"
+
+namespace MiniScript { class Interpreter; }
+
+/// Add the import, exit, env, and run intrinsics to the MiniScript environment.
 /// Call after the interpreter is created.
 void AddMoreIntrinsics();
 
@@ -17,5 +21,13 @@ bool ExitRequested();
 
 /// Returns the exit result code set by the `exit` intrinsic.
 int ExitResultCode();
+
+/// Update the MS_SCRIPT_DIR environment variable to the directory containing
+/// the given file path.
+void UpdateScriptDir(const char* path);
+
+/// Load new source code into the interpreter, preserving global variables.
+/// Resets the VM and recompiles, then restores the saved globals.
+void RunScriptSource(MiniScript::Interpreter* interpreter, MiniScript::String source);
 
 #endif // MOREINTRINSICS_H

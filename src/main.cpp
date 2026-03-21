@@ -17,14 +17,6 @@
 #else
 #include <cstdlib>
 #include <cstring>
-
-static void setEnv(const char* key, const char* value) {
-#if defined(_WIN32)
-	_putenv_s(key, value);
-#else
-	setenv(key, value, 1);
-#endif
-}
 #endif
 
 using namespace MiniScript;
@@ -273,20 +265,14 @@ int main(int argc, char *argv[]) {
 	if (exeDir.LengthB() > 1 && (exeDir[exeDir.LengthB()-1] == '/' || exeDir[exeDir.LengthB()-1] == '\\')) {
 		exeDir = exeDir.SubstringB(0, exeDir.LengthB()-1);
 	}
-	setEnv("MS_EXE_DIR", exeDir.c_str());
+#if defined(_WIN32)
+	_putenv_s("MS_EXE_DIR", exeDir.c_str());
+#else
+	setenv("MS_EXE_DIR", exeDir.c_str(), 1);
+#endif
 
 	// MS_SCRIPT_DIR: directory containing the script being run
-	const char* lastSlash = strrchr(scriptPath, '/');
-#ifdef _WIN32
-	const char* lastBackslash = strrchr(scriptPath, '\\');
-	if (lastBackslash && (!lastSlash || lastBackslash > lastSlash)) lastSlash = lastBackslash;
-#endif
-	if (lastSlash) {
-		String scriptDir(scriptPath, (long)(lastSlash - scriptPath));
-		setEnv("MS_SCRIPT_DIR", scriptDir.c_str());
-	} else {
-		setEnv("MS_SCRIPT_DIR", ".");
-	}
+	UpdateScriptDir(scriptPath);
 #endif
 
 	// Initialize MiniScript
