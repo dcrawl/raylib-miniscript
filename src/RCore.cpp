@@ -1709,7 +1709,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetMonitorCount");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		return IntrinsicResult(GetMonitorCount());
 	};
@@ -1719,7 +1719,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetCurrentMonitor");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		return IntrinsicResult(GetCurrentMonitor());
 	};
@@ -1742,7 +1742,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetMonitorWidth");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		int monitor = context->GetVar(String("monitor")).IntValue();
 		return IntrinsicResult(GetMonitorWidth(monitor));
@@ -1754,7 +1754,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetMonitorHeight");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		int monitor = context->GetVar(String("monitor")).IntValue();
 		return IntrinsicResult(GetMonitorHeight(monitor));
@@ -1766,7 +1766,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetMonitorPhysicalWidth");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		int monitor = context->GetVar(String("monitor")).IntValue();
 		return IntrinsicResult(GetMonitorPhysicalWidth(monitor));
@@ -1778,7 +1778,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetMonitorPhysicalHeight");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		int monitor = context->GetVar(String("monitor")).IntValue();
 		return IntrinsicResult(GetMonitorPhysicalHeight(monitor));
@@ -1790,7 +1790,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetMonitorRefreshRate");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		int monitor = context->GetVar(String("monitor")).IntValue();
 		return IntrinsicResult(GetMonitorRefreshRate(monitor));
@@ -3013,7 +3013,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetFileLength");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		String fileName = context->GetVar(String("fileName")).ToString();
 		return IntrinsicResult(GetFileLength(fileName.c_str()));
@@ -3025,7 +3025,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetFileModTime");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		String fileName = context->GetVar(String("fileName")).ToString();
 		return IntrinsicResult((double)GetFileModTime(fileName.c_str()));
@@ -3219,7 +3219,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetDirectoryFileCount");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		String dirPath = context->GetVar(String("dirPath")).ToString();
 		return IntrinsicResult((int)GetDirectoryFileCount(dirPath.c_str()));
@@ -3233,7 +3233,7 @@ void AddRCoreMethods(ValueDict raylibModule) {
 	i->code = INTRINSIC_LAMBDA {
 	#ifdef PLATFORM_WEB
 		PrintWebNotSupported("GetDirectoryFileCountEx");
-		return IntrinsicResult(0);
+		return IntrinsicResult(Value::zero);
 	#endif
 		String basePath = context->GetVar(String("basePath")).ToString();
 		String filter = context->GetVar(String("filter")).ToString();

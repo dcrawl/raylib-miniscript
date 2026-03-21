@@ -2,7 +2,7 @@
 //  MoreIntrinsics.cpp
 //  raylib-miniscript
 //
-//  Additional intrinsics (import, exit) for the MiniScript environment.
+//  Additional intrinsics (import, exit, env) for the MiniScript environment.
 //
 
 #include "MoreIntrinsics.h"
@@ -23,10 +23,149 @@ extern "C" {
 }
 #endif
 
+#if defined(_WIN32)
+#define PATH_SEP ';'
+#define PATH_SEP_STR ";"
+#else
+#define PATH_SEP ':'
+#define PATH_SEP_STR ":"
+#endif
+
 using namespace MiniScript;
 
 static bool exitASAP = false;
 static int exitResult = 0;
+
+//--------------------------------------------------------------------------------
+// Environment variable support
+//--------------------------------------------------------------------------------
+
+static bool assignEnvVar(ValueDict& dict, Value key, Value value);  // forward declaration
+
+// Get a reference to the shared environment map.
+// On desktop, initialized from the OS environment on first call.
+// On web, starts empty (populated via setEnvVar).
+static ValueDict& envMapRef() {
+	static ValueDict envMap;
+	static bool initialized = false;
+	if (!initialized) {
+		initialized = true;
+#ifndef PLATFORM_WEB
+		// Read all current environment variables from the OS
+		for (char **current = environ; *current; current++) {
+			char* eqPos = strchr(*current, '=');
+			if (!eqPos) continue;
+			String varName(*current, eqPos - *current);
+			String valueStr(eqPos+1);
+			envMap.SetValue(varName, valueStr);
+		}
+#endif
+		envMap.SetAssignOverride(assignEnvVar);
+	}
+	return envMap;
+}
+
+static void setEnvVar(const char* key, const char* value) {
+#ifndef PLATFORM_WEB
+	#if defined(_WIN32)
+		_putenv_s(key, value);
+	#else
+		setenv(key, value, 1);
+	#endif
+#endif
+	// Always update the in-memory map (essential for web; keeps desktop in sync)
+	envMapRef().SetValue(String(key), String(value));
+}
+
+static bool assignEnvVar(ValueDict& dict, Value key, Value value) {
+	setEnvVar(key.ToString().c_str(), value.ToString().c_str());
+	return true;	// setEnvVar already updated the map
+}
+
+static ValueDict getEnvMap() {
+	return envMapRef();
+}
+
+// Expand any occurrences of $VAR, $(VAR) or ${VAR} on all platforms,
+// and also of %VAR% under Windows only, using variables from getEnvMap().
+static String ExpandVariables(String path) {
+	long p0, p1;
+	long len = path.LengthB();
+	ValueDict envMap = getEnvMap();
+	while (true) {
+		p0 = path.IndexOfB("${");
+		if (p0 >= 0) {
+			for (p1=p0+1; p1<len && path[p1] != '}'; p1++) {}
+			if (p1 < len) {
+				String varName = path.SubstringB(p0 + 2, p1 - p0 - 2);
+				path = path.Substring(0, p0) + envMap.Lookup(varName, Value::emptyString).ToString() + path.SubstringB(p1 + 1);
+				len = path.LengthB();
+				continue;
+			}
+		}
+		p0 = path.IndexOfB("$(");
+		if (p0 >= 0) {
+			for (p1=p0+1; p1<len && path[p1] != ')'; p1++) {}
+			if (p1 < len) {
+				String varName = path.SubstringB(p0 + 2, p1 - p0 - 2);
+				path = path.Substring(0, p0) + envMap.Lookup(varName, Value::emptyString).ToString() + path.SubstringB(p1 + 1);
+				len = path.LengthB();
+				continue;
+			}
+		}
+#if defined(_WIN32)
+		p0 = path.IndexOfB("%");
+		if (p0 >= 0) {
+			for (p1=p0+1; p1<len && path[p1] != '%'; p1++) {}
+			if (p1 < len) {
+				String varName = path.SubstringB(p0 + 1, p1 - p0 - 1);
+				path = path.Substring(0, p0) + envMap.Lookup(varName, Value::emptyString).ToString() + path.SubstringB(p1 + 1);
+				len = path.LengthB();
+				continue;
+			}
+		}
+#endif
+		p0 = path.IndexOfB("$");
+		if (p0 >= 0) {
+			// variable continues until non-alphanumeric char
+			p1 = p0+1;
+			while (p1 < len) {
+				char c = path[p1];
+				if (c < '0' || (c > '9' && c < 'A') || (c > 'Z' && c < '_') || c == '`' || c > 'z') break;
+				p1++;
+			}
+			String varName = path.SubstringB(p0 + 1, p1 - p0 - 1);
+			path = path.Substring(0, p0) + envMap.Lookup(varName, Value::emptyString).ToString() + path.SubstringB(p1);
+			len = path.LengthB();
+			continue;
+		}
+		break;
+	}
+	return path;
+}
+
+static IntrinsicResult intrinsic_env(Context *context, IntrinsicResult partialResult) {
+	return IntrinsicResult(getEnvMap());
+}
+
+// Get the import search directory at the given index from MS_IMPORT_PATH.
+// Returns empty string if index is out of range.
+static String GetImportDir(int index) {
+	String importPath = ExpandVariables(String("$MS_IMPORT_PATH"));
+	const char* start = importPath.c_str();
+	int current = 0;
+	while (true) {
+		const char* sep = strchr(start, PATH_SEP);
+		long dirLen = sep ? (long)(sep - start) : (long)strlen(start);
+		if (dirLen > 0) {
+			if (current == index) return String(start, dirLen);
+			current++;
+		}
+		if (!sep) break;
+		start = sep + 1;
+	}
+	return String();
+}
 
 //--------------------------------------------------------------------------------
 // Import intrinsic
@@ -114,9 +253,9 @@ static IntrinsicResult intrinsic_import(Context *context, IntrinsicResult partia
 			int nextPathIndex = data.searchPathIndex + 1;
 			activeImportFetches.erase(it);
 
-			const char* searchPaths[] = { "assets/", "assets/lib/" };
-			if (nextPathIndex < 2) {
-				String path = String(searchPaths[nextPathIndex]) + libname + ".ms";
+			String dir = GetImportDir(nextPathIndex);
+			if (!dir.empty()) {
+				String path = dir + "/" + libname + ".ms";
 
 				long newFetchId = nextImportFetchId++;
 				ImportFetchData& newData = activeImportFetches[newFetchId];
@@ -148,7 +287,11 @@ static IntrinsicResult intrinsic_import(Context *context, IntrinsicResult partia
 		RuntimeException("import: argument must be library name, not path").raise();
 	}
 
-	String path = String("assets/") + libname + ".ms";
+	String dir = GetImportDir(0);
+	if (dir.empty()) {
+		RuntimeException("import: no import paths configured").raise();
+	}
+	String path = dir + "/" + libname + ".ms";
 
 	long fetchId = nextImportFetchId++;
 	ImportFetchData& data = activeImportFetches[fetchId];
@@ -190,13 +333,13 @@ static IntrinsicResult intrinsic_import(Context *context, IntrinsicResult partia
 		RuntimeException("import: argument must be library name, not path").raise();
 	}
 
-	// Search paths for desktop
-	const char* searchPaths[] = { "assets/", "assets/lib/" };
+	// Search each directory in MS_IMPORT_PATH
 	String moduleSource;
 	bool found = false;
-
-	for (int i = 0; i < 2; i++) {
-		String path = String(searchPaths[i]) + libname + ".ms";
+	for (int i = 0; ; i++) {
+		String dir = GetImportDir(i);
+		if (dir.empty()) break;
+		String path = dir + "/" + libname + ".ms";
 		char* text = LoadFileText(path.c_str());
 		if (text != nullptr) {
 			moduleSource = String(text);
@@ -220,49 +363,6 @@ static IntrinsicResult intrinsic_import(Context *context, IntrinsicResult partia
 }
 
 #endif
-
-//--------------------------------------------------------------------------------
-// Env intrinsic (desktop only)
-//--------------------------------------------------------------------------------
-
-#ifndef PLATFORM_WEB
-
-static void setEnvVar(const char* key, const char* value) {
-	#if defined(_WIN32)
-		_putenv_s(key, value);
-	#else
-		setenv(key, value, 1);
-	#endif
-}
-
-static bool assignEnvVar(ValueDict& dict, Value key, Value value) {
-	setEnvVar(key.ToString().c_str(), value.ToString().c_str());
-	return false;	// allow standard assignment to also apply.
-}
-
-static ValueDict getEnvMap() {
-	static ValueDict envMap;
-	if (envMap.Count() == 0) {
-		// The stdlib-supplied `environ` is a null-terminated array of char* (C strings).
-		// Each such C string is of the form NAME=VALUE.  So we need to split on the
-		// first '=' to separate this into keys and values for our env map.
-		for (char **current = environ; *current; current++) {
-			char* eqPos = strchr(*current, '=');
-			if (!eqPos) continue;	// (should never happen, but just in case)
-			String varName(*current, eqPos - *current);
-			String valueStr(eqPos+1);
-			envMap.SetValue(varName, valueStr);
-		}
-		envMap.SetAssignOverride(assignEnvVar);
-	}
-	return envMap;
-}
-
-static IntrinsicResult intrinsic_env(Context *context, IntrinsicResult partialResult) {
-	return IntrinsicResult(getEnvMap());
-}
-
-#endif // !PLATFORM_WEB
 
 //--------------------------------------------------------------------------------
 // Exit intrinsic
@@ -289,10 +389,20 @@ void AddMoreIntrinsics() {
 	exitFunc->AddParam("resultCode");
 	exitFunc->code = &intrinsic_exit;
 
-#ifndef PLATFORM_WEB
 	Intrinsic *envFunc = Intrinsic::Create("env");
 	envFunc->code = &intrinsic_env;
+
+#ifdef PLATFORM_WEB
+	// On web, set default path variables (on desktop, these are set in main.cpp)
+	setEnvVar("MS_EXE_DIR", ".");
+	setEnvVar("MS_SCRIPT_DIR", "assets");
 #endif
+
+	// Set the default import search path (variables are expanded at import time)
+	setEnvVar("MS_IMPORT_PATH",
+		"$MS_SCRIPT_DIR" PATH_SEP_STR
+		"$MS_SCRIPT_DIR/lib" PATH_SEP_STR
+		"$MS_EXE_DIR/assets/lib");
 }
 
 bool ExitRequested() {

@@ -14,6 +14,17 @@
 #ifdef PLATFORM_WEB
 #include <emscripten/emscripten.h>
 #include <emscripten/fetch.h>
+#else
+#include <cstdlib>
+#include <cstring>
+
+static void setEnv(const char* key, const char* value) {
+#if defined(_WIN32)
+	_putenv_s(key, value);
+#else
+	setenv(key, value, 1);
+#endif
+}
 #endif
 
 using namespace MiniScript;
@@ -251,6 +262,33 @@ int main(int argc, char *argv[]) {
 	InstallLoadFileHooks();
 #endif
 
+	// Set up path environment variables (desktop only)
+#ifndef PLATFORM_WEB
+	const char* scriptPath = (argc > 1) ? argv[1] : "assets/main.ms";
+
+	// MS_EXE_DIR: directory containing the executable
+	const char* appDir = GetApplicationDirectory();
+	String exeDir(appDir);
+	// Strip trailing path separator if present
+	if (exeDir.LengthB() > 1 && (exeDir[exeDir.LengthB()-1] == '/' || exeDir[exeDir.LengthB()-1] == '\\')) {
+		exeDir = exeDir.SubstringB(0, exeDir.LengthB()-1);
+	}
+	setEnv("MS_EXE_DIR", exeDir.c_str());
+
+	// MS_SCRIPT_DIR: directory containing the script being run
+	const char* lastSlash = strrchr(scriptPath, '/');
+#ifdef _WIN32
+	const char* lastBackslash = strrchr(scriptPath, '\\');
+	if (lastBackslash && (!lastSlash || lastBackslash > lastSlash)) lastSlash = lastBackslash;
+#endif
+	if (lastSlash) {
+		String scriptDir(scriptPath, (long)(lastSlash - scriptPath));
+		setEnv("MS_SCRIPT_DIR", scriptDir.c_str());
+	} else {
+		setEnv("MS_SCRIPT_DIR", ".");
+	}
+#endif
+
 	// Initialize MiniScript
 	InitMiniScript();
 
@@ -258,7 +296,6 @@ int main(int argc, char *argv[]) {
 #ifdef PLATFORM_WEB
 	fetchScript("assets/main.ms");
 #else
-	const char* scriptPath = (argc > 1) ? argv[1] : "assets/main.ms";
 	loadScriptFromFile(scriptPath);
 #endif
 

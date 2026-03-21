@@ -1422,6 +1422,7 @@ void AddRModelsMethods(ValueDict raylibModule) {
 	};
 	raylibModule.SetValue("UpdateModelAnimation", i->GetFunc());
 
+#ifndef PLATFORM_WEB
 	i = Intrinsic::Create("");
 	i->AddParam("model");
 	i->AddParam("animationA");
@@ -1440,6 +1441,7 @@ void AddRModelsMethods(ValueDict raylibModule) {
 		return IntrinsicResult::Null;
 	};
 	raylibModule.SetValue("UpdateModelAnimationEx", i->GetFunc());
+#endif
 
 	i = Intrinsic::Create("");
 	i->AddParam("animations");
