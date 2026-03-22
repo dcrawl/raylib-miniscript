@@ -31,6 +31,7 @@ set(APP_SOURCES
     src/RaylibTypes.cpp
     src/RawData.cpp
     src/RAudio.cpp
+    src/RVideo.cpp
     src/RCore.cpp
     src/RMath.cpp
     src/RModels.cpp
@@ -111,6 +112,16 @@ if(EMSCRIPTEN)
         )
     endif()
 
+    # Copy web video interop helper if present
+    if(EXISTS ${CMAKE_SOURCE_DIR}/web/video-interop.js)
+        add_custom_command(TARGET raylib-miniscript POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_SOURCE_DIR}/web/video-interop.js
+            ${CMAKE_BINARY_DIR}/video-interop.js
+            COMMENT "Copying video-interop.js to build directory"
+        )
+    endif()
+
     message(STATUS "raylib-miniscript Configuration: Web (Emscripten)")
     message(STATUS "  Raylib library: ${RAYLIB_WEB_LIB}")
     message(STATUS "  Output: raylib-miniscript.html, .js, .wasm")
@@ -144,6 +155,20 @@ else()
             message(FATAL_ERROR "raylib not found. Either:\n"
                 "  1. Build raylib for desktop: cd raylib/src && make\n"
                 "  2. Install raylib system-wide")
+        endif()
+    endif()
+
+    option(ENABLE_VPX_VIDEO "Enable VP8 video playback with libvpx" ON)
+    if(ENABLE_VPX_VIDEO)
+        find_path(VPX_INCLUDE_DIR vpx/vpx_decoder.h)
+        find_library(VPX_LIBRARY NAMES vpx)
+        if(VPX_INCLUDE_DIR AND VPX_LIBRARY)
+            target_include_directories(raylib-miniscript PRIVATE ${VPX_INCLUDE_DIR})
+            target_link_libraries(raylib-miniscript ${VPX_LIBRARY})
+            target_compile_definitions(raylib-miniscript PRIVATE HAVE_LIBVPX=1)
+            message(STATUS "VP8 video support enabled: ${VPX_LIBRARY}")
+        else()
+            message(WARNING "libvpx not found; video playback APIs will be unavailable at runtime")
         endif()
     endif()
 

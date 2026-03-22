@@ -803,3 +803,35 @@
 |SetAudioStreamPitch |**stream**, **pitch**=1.0 |Set pitch for audio stream (1.0 is base level) |
 |SetAudioStreamPan |**stream**, **pan**=0.5 |Set pan for audio stream |
 |SetAudioStreamBufferSizeDefault |**size**=4096 |Default size for new audio streams |
+
+## RVideo (initial)
+
+|Name | Parameters | Purpose |
+|-----|------------|---------|
+|LoadVideoStream |**fileName** |Load a video stream into a VideoPlayer object (desktop: VP8 in IVF via libvpx; web: browser media stack, e.g. .webm) |
+|IsVideoStreamValid |**video** |Check if a video player handle is valid |
+|PlayVideoStream |**video** |Start or restart video playback |
+|PauseVideoStream |**video** |Pause video playback |
+|ResumeVideoStream |**video** |Resume video playback |
+|StopVideoStream |**video** |Stop playback and rewind to beginning |
+|SeekVideoStream |**video**, **position**=0 |Seek to a position (seconds) |
+|UpdateVideoStream |**video** |Advance decode/playback state; call once per game loop tick to keep playback non-blocking |
+|IsVideoStreamPlaying |**video** |Check if video is currently playing |
+|GetVideoTimeLength |**video** |Get total video duration in seconds |
+|GetVideoTimePlayed |**video** |Get current playback time in seconds |
+|GetVideoTexture |**video** |Get current video frame texture for DrawTexture/DrawTexturePro |
+|GetVideoInfo |**video** |Get video metadata map: path, container, codec, width, height, frameRate, frameCount, timeLength, playbackRate, looping, isWebBackend |
+|GetVideoMetadata |**video** |Alias of GetVideoInfo |
+|GetVideoBackend |**video** |Get active backend name as string: `desktop` or `web` |
+|SetVideoLooping |**video**, **enabled**=1 |Enable/disable video looping |
+|GetVideoLooping |**video** |Get current looping mode (1/0) |
+|SetVideoPlaybackRate |**video**, **rate**=1.0 |Set playback rate (clamped 0.05..4.0) |
+|GetVideoPlaybackRate |**video** |Get current playback rate |
+|DidVideoLoop |**video** |Returns 1 once when a loop boundary is crossed, otherwise 0 |
+|DidVideoFinish |**video** |Returns 1 once when playback reaches end (non-looping), otherwise 0 |
+|UnloadVideoStream |**video** |Unload video stream and release decoder/texture resources |
+
+Notes:
+- Keep calling `UpdateVideoStream` in your loop; video decode/upload is incremental and does not halt MiniScript execution.
+- On web builds, audio playback is driven by the browser video element; the same MiniScript API is used.
+- Desktop currently decodes VP8 from IVF container; use `.ivf` assets there until WebM demux is added to native backend.

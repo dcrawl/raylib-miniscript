@@ -12,6 +12,7 @@ ValueDict WaveClass();
 ValueDict MusicClass();
 ValueDict SoundClass();
 ValueDict AudioStreamClass();
+ValueDict VideoPlayerClass();
 ValueDict RenderTextureClass();
 ValueDict ShaderClass();
 ValueDict MeshClass();
@@ -70,6 +71,15 @@ Value AudioStreamToValue(AudioStream stream);
 
 // Extract a Raylib AudioStream from a MiniScript map
 AudioStream ValueToAudioStream(Value value);
+
+// Convert a video player handle and texture metadata to a MiniScript map
+Value VideoPlayerToValue(void* playerHandle, Texture texture, int width, int height, int frameCount, double frameRate, double timeLength);
+
+// Extract raw video player handle pointer from a MiniScript map
+void* ValueToVideoPlayerHandle(Value value);
+
+// Update mutable playback state values on a VideoPlayer map
+void UpdateVideoPlayerStateValue(Value value, int currentFrame, double timePlayed, int isPlaying, int isFinished);
 
 // Convert a Raylib RenderTexture2D to a MiniScript map
 // Allocates the RenderTexture2D on the heap and stores pointer in _handle

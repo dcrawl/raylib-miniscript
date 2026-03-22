@@ -20,6 +20,7 @@ using namespace MiniScript;
 
 // Helper methods, one per Raylib module (each defined in its own .cpp file)
 void AddRAudioMethods(ValueDict raylibModule);
+void AddRVideoMethods(ValueDict raylibModule);
 void AddRCoreMethods(ValueDict raylibModule);
 void AddRModelsMethods(ValueDict raylibModule);
 void AddRMathMethods(ValueDict raylibModule);
@@ -59,6 +60,9 @@ void AddRaylibIntrinsics() {
 	f = Intrinsic::Create("AudioStream");
 	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(AudioStreamClass()); };
 
+	f = Intrinsic::Create("VideoPlayer");
+	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(VideoPlayerClass()); };
+
 	f = Intrinsic::Create("Shader");
 	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(ShaderClass()); };
 
@@ -84,6 +88,7 @@ void AddRaylibIntrinsics() {
 
 		if (raylibModule.Count() == 0) {
 			AddRAudioMethods(raylibModule);
+			AddRVideoMethods(raylibModule);
 			AddRCoreMethods(raylibModule);
 			AddRModelsMethods(raylibModule);
 			AddRMathMethods(raylibModule);
