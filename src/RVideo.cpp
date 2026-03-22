@@ -56,10 +56,15 @@ struct VideoPlayerState {
 	bool hasAudio = false;
 	bool webPlayer = false;
 	bool audioDecodeScaffoldReady = false;
+	bool vorbisHeaderParseAttempted = false;
+	bool vorbisIdentificationSeen = false;
+	bool vorbisCommentSeen = false;
+	bool vorbisSetupSeen = false;
 	int webHandle = 0;
 	int width = 0;
 	int height = 0;
 	int audioChannels = 0;
+	int vorbisParsedChannels = 0;
 	uint32_t audioPacketsRead = 0;
 	uint64_t audioBytesRead = 0;
 	uint32_t audioPacketCount = 0;
@@ -67,6 +72,7 @@ struct VideoPlayerState {
 	double audioLastPacketTime = 0.0;
 	double audioLastReadPacketTime = 0.0;
 	double audioSampleRate = 0.0;
+	double vorbisParsedSampleRate = 0.0;
 	uint32_t frameCount = 0;
 	double frameRate = 0.0;
 	double timeLength = 0.0;
@@ -411,9 +417,67 @@ static bool ParseSimpleBlock(const std::vector<unsigned char>& fileData,
 	return true;
 }
 
+static bool ParseVorbisCodecPrivate(const unsigned char* data, size_t size,
+	bool* outIdentificationSeen, bool* outCommentSeen, bool* outSetupSeen,
+	int* outChannels, double* outSampleRate) {
+	if (outIdentificationSeen) *outIdentificationSeen = false;
+	if (outCommentSeen) *outCommentSeen = false;
+	if (outSetupSeen) *outSetupSeen = false;
+	if (outChannels) *outChannels = 0;
+	if (outSampleRate) *outSampleRate = 0.0;
+
+	if (!data || size < 1) return false;
+
+	int headerCount = (int)data[0] + 1;
+	if (headerCount != 3) return false;
+
+	size_t cursor = 1;
+	size_t headerSizes[3] = {0, 0, 0};
+	for (int i = 0; i < 2; i++) {
+		size_t sz = 0;
+		while (cursor < size && data[cursor] == 0xFF) {
+			sz += 255;
+			cursor += 1;
+		}
+		if (cursor >= size) return false;
+		sz += (size_t)data[cursor++];
+		headerSizes[i] = sz;
+	}
+
+	if (size < cursor + headerSizes[0] + headerSizes[1]) return false;
+	headerSizes[2] = size - cursor - headerSizes[0] - headerSizes[1];
+
+	const unsigned char* h1 = data + cursor;
+	const unsigned char* h2 = h1 + headerSizes[0];
+	const unsigned char* h3 = h2 + headerSizes[1];
+
+	auto hasVorbisSig = [](const unsigned char* p, size_t n, unsigned char expectedType) -> bool {
+		if (!p || n < 7) return false;
+		if (p[0] != expectedType) return false;
+		return p[1] == 'v' && p[2] == 'o' && p[3] == 'r' && p[4] == 'b' && p[5] == 'i' && p[6] == 's';
+	};
+
+	bool idSeen = hasVorbisSig(h1, headerSizes[0], 0x01);
+	bool commentSeen = hasVorbisSig(h2, headerSizes[1], 0x03);
+	bool setupSeen = hasVorbisSig(h3, headerSizes[2], 0x05);
+
+	if (idSeen && headerSizes[0] >= 16) {
+		if (outChannels) *outChannels = (int)h1[11];
+		if (outSampleRate) *outSampleRate = (double)ReadLE32(&h1[12]);
+	}
+
+	if (outIdentificationSeen) *outIdentificationSeen = idSeen;
+	if (outCommentSeen) *outCommentSeen = commentSeen;
+	if (outSetupSeen) *outSetupSeen = setupSeen;
+	return true;
+}
+
 static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outFps, std::vector<EncodedFrame>* outFrames, double* outDuration,
 	bool* outHasAudio, std::string* outAudioCodec, double* outAudioSampleRate, int* outAudioChannels,
-	std::vector<EncodedFrame>* outAudioPackets) {
+	std::vector<EncodedFrame>* outAudioPackets,
+	bool* outVorbisHeaderParseAttempted, bool* outVorbisIdentificationSeen,
+	bool* outVorbisCommentSeen, bool* outVorbisSetupSeen,
+	int* outVorbisParsedChannels, double* outVorbisParsedSampleRate) {
 	std::vector<unsigned char> fileData;
 	if (!ReadFileBytes(path, &fileData)) return false;
 
@@ -456,6 +520,12 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 	std::string audioCodec;
 	double audioSampleRate = 0.0;
 	int audioChannels = 0;
+	bool vorbisHeaderParseAttempted = false;
+	bool vorbisIdentificationSeen = false;
+	bool vorbisCommentSeen = false;
+	bool vorbisSetupSeen = false;
+	int vorbisParsedChannels = 0;
+	double vorbisParsedSampleRate = 0.0;
 	double audioFirstPacketTime = 0.0;
 	double audioLastPacketTime = 0.0;
 	bool sawAudioPacket = false;
@@ -516,6 +586,7 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 					int th = 0;
 					double asr = 0.0;
 					int ach = 0;
+					std::vector<unsigned char> codecPrivate;
 
 					size_t tp = s;
 					while (tp < e) {
@@ -534,6 +605,8 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 							for (size_t i = 0; i < (size_t)tsz; i++) tt = (tt << 8) | fileData[ts + i];
 						} else if (tid == 0x86ULL) {
 							codec.assign((const char*)&fileData[ts], (size_t)tsz);
+						} else if (tid == 0x63A2ULL) {
+							codecPrivate.assign(fileData.begin() + (ptrdiff_t)ts, fileData.begin() + (ptrdiff_t)te);
 						} else if (tid == 0x23E383ULL && tsz > 0 && tsz <= 8) {
 							for (size_t i = 0; i < (size_t)tsz; i++) defaultDuration = (defaultDuration << 8) | fileData[ts + i];
 						} else if (tid == 0xE0ULL) {
@@ -592,6 +665,24 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 						hasAudio = true;
 						if (audioTrack == 0) audioTrack = tn;
 						if (!codec.empty()) audioCodec = codec;
+						if (codec == "A_VORBIS" && !codecPrivate.empty()) {
+							bool idSeen = false;
+							bool commentSeen = false;
+							bool setupSeen = false;
+							int parsedChannels = 0;
+							double parsedSampleRate = 0.0;
+							vorbisHeaderParseAttempted = true;
+							if (ParseVorbisCodecPrivate(codecPrivate.data(), codecPrivate.size(),
+								&idSeen, &commentSeen, &setupSeen, &parsedChannels, &parsedSampleRate)) {
+								vorbisIdentificationSeen = vorbisIdentificationSeen || idSeen;
+								vorbisCommentSeen = vorbisCommentSeen || commentSeen;
+								vorbisSetupSeen = vorbisSetupSeen || setupSeen;
+								if (parsedChannels > 0) vorbisParsedChannels = parsedChannels;
+								if (parsedSampleRate > 0.0) vorbisParsedSampleRate = parsedSampleRate;
+								if (ach <= 0 && parsedChannels > 0) ach = parsedChannels;
+								if (asr <= 0.0 && parsedSampleRate > 0.0) asr = parsedSampleRate;
+							}
+						}
 						if (asr > 0.0) audioSampleRate = asr;
 						if (ach > 0) audioChannels = ach;
 					}
@@ -726,6 +817,12 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 	if (outAudioSampleRate) *outAudioSampleRate = audioSampleRate;
 	if (outAudioChannels) *outAudioChannels = audioChannels;
 	if (outAudioPackets) *outAudioPackets = audioPackets;
+	if (outVorbisHeaderParseAttempted) *outVorbisHeaderParseAttempted = vorbisHeaderParseAttempted;
+	if (outVorbisIdentificationSeen) *outVorbisIdentificationSeen = vorbisIdentificationSeen;
+	if (outVorbisCommentSeen) *outVorbisCommentSeen = vorbisCommentSeen;
+	if (outVorbisSetupSeen) *outVorbisSetupSeen = vorbisSetupSeen;
+	if (outVorbisParsedChannels) *outVorbisParsedChannels = vorbisParsedChannels;
+	if (outVorbisParsedSampleRate) *outVorbisParsedSampleRate = vorbisParsedSampleRate;
 	if (outHasAudio && *outHasAudio && outAudioSampleRate && *outAudioSampleRate <= 0.0 && fps > 0.0) {
 		// Keep fields consistent for scripts even when container omits explicit audio sampling metadata.
 		*outAudioSampleRate = 0.0;
@@ -896,6 +993,12 @@ static void InitializeDesktopAudioDecodeScaffold(VideoPlayerState* state) {
 	if (!state) return;
 	state->audioDecodeScaffoldReady = false;
 	state->audioDecodePath.clear();
+	state->vorbisHeaderParseAttempted = false;
+	state->vorbisIdentificationSeen = false;
+	state->vorbisCommentSeen = false;
+	state->vorbisSetupSeen = false;
+	state->vorbisParsedChannels = 0;
+	state->vorbisParsedSampleRate = 0.0;
 	state->audioPacketsRead = 0;
 	state->audioBytesRead = 0;
 	state->audioLastReadPacketTime = 0.0;
@@ -928,6 +1031,27 @@ static bool ReadDesktopAudioPacketAtIndex(VideoPlayerState* state, size_t idx, s
 	return true;
 }
 
+static void UpdateVorbisHeaderScaffold(VideoPlayerState* state, const std::vector<unsigned char>& packet) {
+	if (!state) return;
+	if (state->audioCodecName != "A_VORBIS") return;
+	state->vorbisHeaderParseAttempted = true;
+	if (packet.size() < 7) return;
+	if (!(packet[1] == 'v' && packet[2] == 'o' && packet[3] == 'r' && packet[4] == 'b' && packet[5] == 'i' && packet[6] == 's')) return;
+
+	uint8_t headerType = packet[0];
+	if (headerType == 0x01) {
+		state->vorbisIdentificationSeen = true;
+		if (packet.size() >= 16) {
+			state->vorbisParsedChannels = (int)packet[11];
+			state->vorbisParsedSampleRate = (double)ReadLE32(&packet[12]);
+		}
+	} else if (headerType == 0x03) {
+		state->vorbisCommentSeen = true;
+	} else if (headerType == 0x05) {
+		state->vorbisSetupSeen = true;
+	}
+}
+
 static int StepDesktopAudioDecodeScaffold(VideoPlayerState* state, int maxPackets) {
 	if (!state || !state->audioDecodeScaffoldReady) return 0;
 	if (maxPackets <= 0) return 0;
@@ -940,6 +1064,9 @@ static int StepDesktopAudioDecodeScaffold(VideoPlayerState* state, int maxPacket
 		state->audioPacketsRead += 1;
 		state->audioBytesRead += (uint64_t)packet.size();
 		state->audioLastReadPacketTime = state->audioPackets[state->nextAudioPacketIndex].pts;
+		if (state->audioCodecName == "A_VORBIS") {
+			UpdateVorbisHeaderScaffold(state, packet);
+		}
 		state->nextAudioPacketIndex += 1;
 		readCount += 1;
 	}
@@ -972,6 +1099,12 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	std::string webmAudioCodec;
 	double webmAudioSampleRate = 0.0;
 	int webmAudioChannels = 0;
+	bool webmVorbisHeaderParseAttempted = false;
+	bool webmVorbisIdentificationSeen = false;
+	bool webmVorbisCommentSeen = false;
+	bool webmVorbisSetupSeen = false;
+	int webmVorbisParsedChannels = 0;
+	double webmVorbisParsedSampleRate = 0.0;
 	std::vector<EncodedFrame> webmFrames;
 	std::vector<EncodedFrame> webmAudioPackets;
 
@@ -985,7 +1118,9 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 		state->timeLength = ivfDuration;
 		state->frames = ivfFrames;
 	} else if (ParseWebMFrames(path, &webmW, &webmH, &webmFps, &webmFrames, &webmDuration,
-		&webmHasAudio, &webmAudioCodec, &webmAudioSampleRate, &webmAudioChannels, &webmAudioPackets)) {
+		&webmHasAudio, &webmAudioCodec, &webmAudioSampleRate, &webmAudioChannels, &webmAudioPackets,
+		&webmVorbisHeaderParseAttempted, &webmVorbisIdentificationSeen, &webmVorbisCommentSeen,
+		&webmVorbisSetupSeen, &webmVorbisParsedChannels, &webmVorbisParsedSampleRate)) {
 		state->container = "webm";
 		state->codecName = "vp8";
 		state->width = webmW;
@@ -1035,6 +1170,16 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	state->playBaseTime = 0.0;
 	state->lastError.clear();
 	InitializeDesktopAudioDecodeScaffold(state);
+	if (state->audioCodecName == "A_VORBIS") {
+		state->vorbisHeaderParseAttempted = webmVorbisHeaderParseAttempted;
+		state->vorbisIdentificationSeen = webmVorbisIdentificationSeen;
+		state->vorbisCommentSeen = webmVorbisCommentSeen;
+		state->vorbisSetupSeen = webmVorbisSetupSeen;
+		if (webmVorbisParsedChannels > 0) state->vorbisParsedChannels = webmVorbisParsedChannels;
+		if (webmVorbisParsedSampleRate > 0.0) state->vorbisParsedSampleRate = webmVorbisParsedSampleRate;
+		if (state->audioChannels <= 0 && state->vorbisParsedChannels > 0) state->audioChannels = state->vorbisParsedChannels;
+		if (state->audioSampleRate <= 0.0 && state->vorbisParsedSampleRate > 0.0) state->audioSampleRate = state->vorbisParsedSampleRate;
+	}
 	state->valid = true;
 	return state;
 }
@@ -1542,6 +1687,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
 		info.SetValue(String("lastReadPacketTime"), Value(state->audioLastReadPacketTime));
 		info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
+		info.SetValue(String("vorbisHeaderParseAttempted"), Value(state->vorbisHeaderParseAttempted ? 1 : 0));
+		info.SetValue(String("vorbisIdentificationSeen"), Value(state->vorbisIdentificationSeen ? 1 : 0));
+		info.SetValue(String("vorbisCommentSeen"), Value(state->vorbisCommentSeen ? 1 : 0));
+		info.SetValue(String("vorbisSetupSeen"), Value(state->vorbisSetupSeen ? 1 : 0));
+		info.SetValue(String("vorbisHeadersReady"), Value((state->vorbisIdentificationSeen && state->vorbisCommentSeen && state->vorbisSetupSeen) ? 1 : 0));
+		info.SetValue(String("vorbisParsedChannels"), Value(state->vorbisParsedChannels));
+		info.SetValue(String("vorbisParsedSampleRate"), Value(state->vorbisParsedSampleRate));
 		return IntrinsicResult(Value(info));
 #endif
 	};

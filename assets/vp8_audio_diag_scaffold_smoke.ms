@@ -44,10 +44,25 @@ if step.supported == null or step.readCount == null or step.totalReadPackets == 
 	rl.UnloadVideoStream video
 	exit 1
 end if
+if step.vorbisHeaderParseAttempted == null or step.vorbisHeadersReady == null then
+	print "Audio diag/scaffold smoke failed: missing vorbis readiness fields"
+	rl.UnloadVideoStream video
+	exit 1
+end if
+if step.vorbisIdentificationSeen == null or step.vorbisCommentSeen == null or step.vorbisSetupSeen == null then
+	print "Audio diag/scaffold smoke failed: missing vorbis header flags"
+	rl.UnloadVideoStream video
+	exit 1
+end if
 
 if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 	if step.supported != 1 then
 		print "Audio diag/scaffold smoke failed: expected scaffold support for A_VORBIS"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if step.vorbisHeaderParseAttempted != 1 then
+		print "Audio diag/scaffold smoke failed: expected Vorbis header parse attempt"
 		rl.UnloadVideoStream video
 		exit 1
 	end if
@@ -65,6 +80,7 @@ end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
 print "audio scaffold: supported=" + str(step.supported) + " readCount=" + str(step.readCount) + " totalReadPackets=" + str(step.totalReadPackets) + " totalReadBytes=" + str(step.totalReadBytes)
+print "audio headers: attempted=" + str(step.vorbisHeaderParseAttempted) + " ready=" + str(step.vorbisHeadersReady) + " id=" + str(step.vorbisIdentificationSeen) + " comment=" + str(step.vorbisCommentSeen) + " setup=" + str(step.vorbisSetupSeen)
 
 rl.UnloadVideoStream video
 print "Audio diag/scaffold smoke done"
