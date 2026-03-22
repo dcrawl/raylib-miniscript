@@ -123,14 +123,15 @@ run_case() {
     vp8_audio_diag_scaffold_smoke)
       if /usr/bin/grep -q "audio diag: packets=" "$log" \
         && /usr/bin/grep -q "audio scaffold: supported=" "$log" \
+        && /usr/bin/grep -q "audio decode stub: status=" "$log" \
         && /usr/bin/grep -q "Audio diag/scaffold smoke done" "$log" \
         && ! /usr/bin/grep -q "Audio diag/scaffold smoke failed:" "$log"; then
         echo "[PASS] $name"
-        /usr/bin/grep -n "audio diag: packets=\|audio scaffold: supported=\|Audio diag/scaffold smoke done" "$log" | /usr/bin/tail -n 10
+        /usr/bin/grep -n "audio diag: packets=\|audio scaffold: supported=\|audio decode stub: status=\|Audio diag/scaffold smoke done" "$log" | /usr/bin/tail -n 10
         PASS_COUNT=$((PASS_COUNT + 1))
       else
         echo "[FAIL] $name (expected audio diagnostics/scaffold markers missing)"
-        /usr/bin/grep -n "audio diag: packets=\|audio scaffold: supported=\|Audio diag/scaffold smoke failed:\|Audio diag/scaffold smoke done" "$log" || true
+        /usr/bin/grep -n "audio diag: packets=\|audio scaffold: supported=\|audio decode stub: status=\|Audio diag/scaffold smoke failed:\|Audio diag/scaffold smoke done" "$log" || true
         FAIL_COUNT=$((FAIL_COUNT + 1))
       fi
       ;;

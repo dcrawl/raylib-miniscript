@@ -825,7 +825,8 @@
 |GetVideoBackend |**video** |Get active backend name as string: `desktop` or `web` |
 |GetVideoLastError |**video**=null |Get last diagnostic error string (per-player decode/runtime error when video is provided; otherwise returns last load error) |
 |GetVideoAudioIndexDiagnostics |**video** |Get audio packet index diagnostics map: hasAudio, packetCount, firstPacketTime, lastPacketTime, packetSpan, minDelta, maxDelta, avgDelta, nonMonotonicCount, isMonotonic |
-|StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map (`supported`, `readCount`, `totalReadPackets`, `totalReadBytes`, plus Vorbis header readiness fields) |
+|StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map (`supported`, `readCount`, `totalReadPackets`, `totalReadBytes`, Vorbis header readiness, and decode-gating summary like `readyForDecode`, `vorbisHeaderSource`, `vorbisMissingHeaders`) |
+|DecodeVideoAudioPacket |**video** |Desktop no-playback decode-call stub: consumes one ready audio packet and returns structured status/result map (`status`, `message`, `consumedPacket`, `packetIndex`, `packetPts`, `packetBytes`, `readyForDecode`) |
 |SetVideoLooping |**video**, **enabled**=1 |Enable/disable video looping |
 |GetVideoLooping |**video** |Get current looping mode (1/0) |
 |SetVideoPlaybackRate |**video**, **rate**=1.0 |Set playback rate (clamped 0.05..4.0) |
@@ -838,7 +839,8 @@ Notes:
 - Keep calling `UpdateVideoStream` in your loop; video decode/upload is incremental and does not halt MiniScript execution.
 - On web builds, audio playback is driven by the browser video element; the same MiniScript API is used.
 - Desktop decodes VP8 from IVF and WebM containers; unsupported/invalid WebM block layouts are reported through runtime warnings.
-- `StepVideoAudioDecodeScaffold` is intentionally a scaffolding API: it only reads encoded audio packets (no audio playback/sync yet) and reports Vorbis header readiness (`vorbisHeaderParseAttempted`, `vorbisIdentificationSeen`, `vorbisCommentSeen`, `vorbisSetupSeen`, `vorbisHeadersReady`) sourced from packet scans and Matroska `CodecPrivate` parsing.
+- `StepVideoAudioDecodeScaffold` is intentionally a scaffolding API: it only reads encoded audio packets (no audio playback/sync yet) and reports Vorbis header readiness (`vorbisHeaderParseAttempted`, `vorbisIdentificationSeen`, `vorbisCommentSeen`, `vorbisSetupSeen`, `vorbisHeadersReady`) sourced from packet scans and Matroska `CodecPrivate` parsing, plus decode gating (`readyForDecode`) and source/missing-header diagnostics (`vorbisHeaderSource`, `vorbisMissingHeaders`).
+- `DecodeVideoAudioPacket` is currently a stable stub contract for future decoder integration: when ready, it consumes exactly one packet and returns `status="decode-not-wired"` until real decode internals are connected.
 
 MiniScript helper example (standard load + diagnostics):
 
