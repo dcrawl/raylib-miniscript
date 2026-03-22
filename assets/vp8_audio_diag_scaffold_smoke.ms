@@ -36,6 +36,7 @@ end if
 step = rl.StepVideoAudioDecodeScaffold(video, 4)
 decodeStub = null
 decodeState = null
+decodeBatch = null
 if step == null then
 	print "Audio diag/scaffold smoke failed: scaffold result is null"
 	rl.UnloadVideoStream video
@@ -147,6 +148,44 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+
+	decodeBatch = rl.DecodeVideoAudioPacketBatch(video, 2)
+	if decodeBatch == null then
+		print "Audio diag/scaffold smoke failed: decode batch result is null"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if len(decodeBatch) < 1 then
+		print "Audio diag/scaffold smoke failed: decode batch expected at least one item"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if len(decodeBatch) > 2 then
+		print "Audio diag/scaffold smoke failed: decode batch exceeded maxPackets"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	firstItem = decodeBatch[0]
+	if firstItem.status == null or firstItem.message == null or firstItem.consumedPacket == null then
+		print "Audio diag/scaffold smoke failed: decode batch item missing structured fields"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if firstItem.status != "decode-not-wired" then
+		print "Audio diag/scaffold smoke failed: decode batch first item expected decode-not-wired"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if firstItem.consumedPacket != 1 then
+		print "Audio diag/scaffold smoke failed: decode batch first item expected consumed packet"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if firstItem.packetBytes <= 0 then
+		print "Audio diag/scaffold smoke failed: decode batch first item expected positive packetBytes"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
@@ -158,6 +197,9 @@ if decodeStub != null then
 end if
 if decodeState != null then
 	print "audio decode state: status=" + decodeState.status + " totalReadPackets=" + str(decodeState.totalReadPackets) + " remaining=" + str(decodeState.remainingPackets) + " readyForDecode=" + str(decodeState.readyForDecode)
+end if
+if decodeBatch != null then
+	print "audio decode batch: count=" + str(len(decodeBatch)) + " firstStatus=" + decodeBatch[0].status + " firstConsumed=" + str(decodeBatch[0].consumedPacket)
 end if
 
 rl.UnloadVideoStream video

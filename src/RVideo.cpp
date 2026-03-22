@@ -1828,6 +1828,103 @@ void AddRVideoMethods(ValueDict raylibModule) {
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");
+	i->AddParam("maxPackets", Value(4));
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+
+		int maxPackets = context->GetVar(String("maxPackets")).IntValue();
+		if (maxPackets < 1) maxPackets = 1;
+		if (maxPackets > 1024) maxPackets = 1024;
+
+		ValueList results;
+		auto makeBaseResult = [&](VideoPlayerState* s) {
+			ValueDict info;
+			info.SetValue(String("codec"), Value(String(s->audioCodecName.c_str())));
+			info.SetValue(String("decodePath"), Value(String(s->audioDecodePath.c_str())));
+			info.SetValue(String("supported"), Value(s->audioDecodeScaffoldReady ? 1 : 0));
+			int ready = IsAudioDecodeReady(s) ? 1 : 0;
+			info.SetValue(String("readyForDecode"), Value(ready));
+			info.SetValue(String("consumedPacket"), Value::zero);
+			info.SetValue(String("packetIndex"), Value(-1));
+			info.SetValue(String("packetPts"), Value(0.0));
+			info.SetValue(String("packetBytes"), Value::zero);
+			info.SetValue(String("decodedSamples"), Value::zero);
+			info.SetValue(String("decodedChannels"), Value(s->audioChannels));
+			info.SetValue(String("decodedSampleRate"), Value(s->audioSampleRate));
+			info.SetValue(String("totalReadPackets"), Value((int)s->audioPacketsRead));
+			info.SetValue(String("totalReadBytes"), Value((double)s->audioBytesRead));
+			info.SetValue(String("remainingPackets"), Value((int)(s->audioPackets.size() - s->nextAudioPacketIndex)));
+			return info;
+		};
+
+#ifdef PLATFORM_WEB
+		ValueDict info = makeBaseResult(state);
+		info.SetValue(String("status"), Value(String("web-backend")));
+		info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
+		results.Add(Value(info));
+		return IntrinsicResult(Value(results));
+#else
+		if (state->webPlayer) {
+			ValueDict info = makeBaseResult(state);
+			info.SetValue(String("status"), Value(String("web-backend")));
+			info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
+			results.Add(Value(info));
+			return IntrinsicResult(Value(results));
+		}
+
+		for (int iter = 0; iter < maxPackets; iter++) {
+			ValueDict info = makeBaseResult(state);
+			int ready = IsAudioDecodeReady(state) ? 1 : 0;
+
+			if (!state->audioDecodeScaffoldReady) {
+				info.SetValue(String("status"), Value(String("unsupported-codec")));
+				info.SetValue(String("message"), Value(String("audio decode path is not scaffolded for this codec")));
+				results.Add(Value(info));
+				break;
+			}
+			if (!ready) {
+				info.SetValue(String("status"), Value(String("not-ready")));
+				info.SetValue(String("message"), Value(String("audio headers are incomplete; decoder not ready")));
+				results.Add(Value(info));
+				break;
+			}
+			if (state->nextAudioPacketIndex >= state->audioPackets.size()) {
+				info.SetValue(String("status"), Value(String("end-of-stream")));
+				info.SetValue(String("message"), Value(String("no more audio packets to consume")));
+				results.Add(Value(info));
+				break;
+			}
+
+			uint32_t packetIndex = 0;
+			double packetPts = 0.0;
+			size_t packetBytes = 0;
+			if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes)) {
+				info.SetValue(String("status"), Value(String("read-failed")));
+				info.SetValue(String("message"), Value(String("failed to read audio packet from stream")));
+				results.Add(Value(info));
+				break;
+			}
+
+			info.SetValue(String("consumedPacket"), Value(1));
+			info.SetValue(String("packetIndex"), Value((int)packetIndex));
+			info.SetValue(String("packetPts"), Value(packetPts));
+			info.SetValue(String("packetBytes"), Value((int)packetBytes));
+			info.SetValue(String("status"), Value(String("decode-not-wired")));
+			info.SetValue(String("message"), Value(String("packet consumed; decoder internals not yet wired")));
+			info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
+			info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+			info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
+			results.Add(Value(info));
+		}
+
+		return IntrinsicResult(Value(results));
+#endif
+	};
+	raylibModule.SetValue("DecodeVideoAudioPacketBatch", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
 	i->code = INTRINSIC_LAMBDA {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
