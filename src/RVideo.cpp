@@ -1795,9 +1795,11 @@ void AddRVideoMethods(ValueDict raylibModule) {
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");
+	i->AddParam("expectedSessionId", Value::zero);
 	i->code = INTRINSIC_LAMBDA {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
+		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
 
 		ValueDict info;
 		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
@@ -1825,6 +1827,11 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (state->webPlayer) {
 			info.SetValue(String("status"), Value(String("web-backend")));
 			info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
+			return IntrinsicResult(Value(info));
+		}
+		if (expectedSessionId > 0 && expectedSessionId != (int)state->audioDecodeSessionId) {
+			info.SetValue(String("status"), Value(String("session-mismatch")));
+			info.SetValue(String("message"), Value(String("stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession")));
 			return IntrinsicResult(Value(info));
 		}
 		if (!state->audioDecodeScaffoldReady) {
@@ -1869,11 +1876,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 	i = Intrinsic::Create("");
 	i->AddParam("video");
 	i->AddParam("maxPackets", Value(4));
+	i->AddParam("expectedSessionId", Value::zero);
 	i->code = INTRINSIC_LAMBDA {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
 		int maxPackets = context->GetVar(String("maxPackets")).IntValue();
+		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
 		if (maxPackets < 1) maxPackets = 1;
 		if (maxPackets > 1024) maxPackets = 1024;
 
@@ -1910,6 +1919,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			ValueDict info = makeBaseResult(state);
 			info.SetValue(String("status"), Value(String("web-backend")));
 			info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
+			results.Add(Value(info));
+			return IntrinsicResult(Value(results));
+		}
+		if (expectedSessionId > 0 && expectedSessionId != (int)state->audioDecodeSessionId) {
+			ValueDict info = makeBaseResult(state);
+			info.SetValue(String("status"), Value(String("session-mismatch")));
+			info.SetValue(String("message"), Value(String("stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession")));
 			results.Add(Value(info));
 			return IntrinsicResult(Value(results));
 		}

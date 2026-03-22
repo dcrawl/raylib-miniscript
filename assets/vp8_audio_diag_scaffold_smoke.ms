@@ -38,6 +38,8 @@ decodeStub = null
 decodeState = null
 decodeBatch = null
 resetState = null
+staleDecode = null
+staleBatch = null
 if step == null then
 	print "Audio diag/scaffold smoke failed: scaffold result is null"
 	rl.UnloadVideoStream video
@@ -239,6 +241,45 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+
+	staleDecode = rl.DecodeVideoAudioPacket(video, decodeStub.decodeSessionId)
+	if staleDecode == null then
+		print "Audio diag/scaffold smoke failed: stale decode session guard returned null"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleDecode.status != "session-mismatch" then
+		print "Audio diag/scaffold smoke failed: stale decode expected session-mismatch status"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleDecode.consumedPacket != 0 then
+		print "Audio diag/scaffold smoke failed: stale decode should not consume packet"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleDecode.decodeSessionId != resetState.decodeSessionId then
+		print "Audio diag/scaffold smoke failed: stale decode should report current session id"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+
+	staleBatch = rl.DecodeVideoAudioPacketBatch(video, 2, decodeStub.decodeSessionId)
+	if staleBatch == null or len(staleBatch) < 1 then
+		print "Audio diag/scaffold smoke failed: stale batch guard expected one result"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleBatch[0].status != "session-mismatch" then
+		print "Audio diag/scaffold smoke failed: stale batch expected session-mismatch"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleBatch[0].consumedPacket != 0 then
+		print "Audio diag/scaffold smoke failed: stale batch should not consume packet"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
@@ -256,6 +297,12 @@ if decodeBatch != null then
 end if
 if resetState != null then
 	print "audio decode reset: sessionId=" + str(resetState.decodeSessionId) + " status=" + resetState.status + " totalReadPackets=" + str(resetState.totalReadPackets) + " nextPacketIndex=" + str(resetState.nextPacketIndex) + " readyForDecode=" + str(resetState.readyForDecode)
+end if
+if staleDecode != null then
+	print "audio decode stale guard: status=" + staleDecode.status + " consumed=" + str(staleDecode.consumedPacket) + " sessionId=" + str(staleDecode.decodeSessionId)
+end if
+if staleBatch != null then
+	print "audio decode stale batch guard: status=" + staleBatch[0].status + " consumed=" + str(staleBatch[0].consumedPacket) + " sessionId=" + str(staleBatch[0].decodeSessionId)
 end if
 
 rl.UnloadVideoStream video
