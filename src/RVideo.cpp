@@ -18,6 +18,7 @@
 #include <cmath>
 #include <string>
 #include <vector>
+#include <cstring>
 
 #ifdef PLATFORM_WEB
 #include <emscripten/emscripten.h>
@@ -46,13 +47,26 @@ struct VideoPlayerState {
 	std::string path;
 	std::string container;
 	std::string codecName;
+	std::string lastError;
+	std::string audioCodecName;
+	std::string audioDecodePath;
 	bool valid = false;
 	bool playing = false;
 	bool finished = false;
+	bool hasAudio = false;
 	bool webPlayer = false;
+	bool audioDecodeScaffoldReady = false;
 	int webHandle = 0;
 	int width = 0;
 	int height = 0;
+	int audioChannels = 0;
+	uint32_t audioPacketsRead = 0;
+	uint64_t audioBytesRead = 0;
+	uint32_t audioPacketCount = 0;
+	double audioFirstPacketTime = 0.0;
+	double audioLastPacketTime = 0.0;
+	double audioLastReadPacketTime = 0.0;
+	double audioSampleRate = 0.0;
 	uint32_t frameCount = 0;
 	double frameRate = 0.0;
 	double timeLength = 0.0;
@@ -73,9 +87,13 @@ struct VideoPlayerState {
 	vpx_codec_ctx_t codec;
 	bool codecInited = false;
 	std::vector<EncodedFrame> frames;
+	std::vector<EncodedFrame> audioPackets;
 	size_t nextFrameIndex = 0;
+	size_t nextAudioPacketIndex = 0;
 #endif
 };
+
+static std::string gLastVideoLoadError;
 
 #ifdef PLATFORM_WEB
 EM_ASYNC_JS(int, WebVideoLoad, (const char* urlPtr, int* outW, int* outH, double* outDuration), {
@@ -176,6 +194,37 @@ static uint64_t ReadLE64(const unsigned char* p) {
 		((uint64_t)p[7] << 56);
 }
 
+static uint32_t ReadBE32(const unsigned char* p) {
+	return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) | ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
+static uint64_t ReadBE64(const unsigned char* p) {
+	return ((uint64_t)p[0] << 56) |
+		((uint64_t)p[1] << 48) |
+		((uint64_t)p[2] << 40) |
+		((uint64_t)p[3] << 32) |
+		((uint64_t)p[4] << 24) |
+		((uint64_t)p[5] << 16) |
+		((uint64_t)p[6] << 8) |
+		(uint64_t)p[7];
+}
+
+static double ReadBigEndianFloat(const unsigned char* p, size_t sz) {
+	if (sz == 4) {
+		uint32_t bits = ReadBE32(p);
+		float f = 0.0f;
+		std::memcpy(&f, &bits, sizeof(float));
+		return (double)f;
+	}
+	if (sz == 8) {
+		uint64_t bits = ReadBE64(p);
+		double d = 0.0;
+		std::memcpy(&d, &bits, sizeof(double));
+		return d;
+	}
+	return 0.0;
+}
+
 static unsigned char ClampByte(int v) {
 	if (v < 0) return 0;
 	if (v > 255) return 255;
@@ -244,7 +293,12 @@ static bool ParseSimpleBlock(const std::vector<unsigned char>& fileData,
 							 uint64_t clusterTimecode,
 							 uint64_t timecodeScale,
 							 uint64_t wantedTrack,
-							 std::vector<EncodedFrame>* outFrames) {
+							 std::vector<EncodedFrame>* outFrames,
+							 size_t* outPushedFrames,
+							 bool* outUsedLacing) {
+	if (outPushedFrames) *outPushedFrames = 0;
+	if (outUsedLacing) *outUsedLacing = false;
+
 	size_t p = payloadStart;
 	size_t payloadEnd = payloadStart + payloadSize;
 	if (payloadEnd > fileData.size()) return false;
@@ -258,22 +312,108 @@ static bool ParseSimpleBlock(const std::vector<unsigned char>& fileData,
 	unsigned char flags = fileData[p++];
 
 	unsigned char lacing = (unsigned char)((flags >> 1) & 0x03);
-	if (lacing != 0) return true;
 	if (trackNum != wantedTrack) return true;
 	if (p >= payloadEnd) return true;
+	if (lacing != 0 && outUsedLacing) *outUsedLacing = true;
 
 	uint64_t tc = clusterTimecode + (int64_t)relTc;
 	double pts = ((double)tc * (double)timecodeScale) / 1000000000.0;
+	size_t pushed = 0;
 
-	EncodedFrame frame;
-	frame.offset = (long)p;
-	frame.size = (uint32_t)(payloadEnd - p);
-	frame.pts = pts;
-	outFrames->push_back(frame);
+	if (lacing == 0) {
+		EncodedFrame frame;
+		frame.offset = (long)p;
+		frame.size = (uint32_t)(payloadEnd - p);
+		frame.pts = pts;
+		outFrames->push_back(frame);
+		if (outPushedFrames) *outPushedFrames = 1;
+		return true;
+	}
+
+	if (p >= payloadEnd) return false;
+	uint8_t laceCount = (uint8_t)(fileData[p++] + 1);
+	if (laceCount == 0) return false;
+
+	std::vector<size_t> frameSizes;
+	frameSizes.reserve((size_t)laceCount);
+
+	if (lacing == 1) {
+		for (uint8_t i = 0; i + 1 < laceCount; i++) {
+			size_t sz = 0;
+			while (true) {
+				if (p >= payloadEnd) return false;
+				unsigned char b = fileData[p++];
+				sz += (size_t)b;
+				if (b != 255) break;
+			}
+			frameSizes.push_back(sz);
+		}
+	} else if (lacing == 2) {
+		size_t remaining = payloadEnd - p;
+		if (remaining < (size_t)laceCount) return false;
+		if ((remaining % (size_t)laceCount) != 0) return false;
+		size_t each = remaining / (size_t)laceCount;
+		for (uint8_t i = 0; i < laceCount; i++) frameSizes.push_back(each);
+	} else if (lacing == 3) {
+		uint64_t firstSize = 0;
+		if (!ReadEBMLVint(fileData, &p, 8, true, &firstSize, nullptr, nullptr)) return false;
+		frameSizes.push_back((size_t)firstSize);
+
+		for (uint8_t i = 1; i + 1 < laceCount; i++) {
+			if (p >= payloadEnd) return false;
+			unsigned char first = fileData[p];
+			unsigned char mask = 0x80;
+			int len = 1;
+			while (len <= 8 && (first & mask) == 0) {
+				mask >>= 1;
+				len += 1;
+			}
+			if (len > 8) return false;
+
+			uint64_t vint = 0;
+			if (!ReadEBMLVint(fileData, &p, 8, true, &vint, nullptr, nullptr)) return false;
+			int64_t bias = ((int64_t)1 << (7 * len - 1)) - 1;
+			int64_t delta = (int64_t)vint - bias;
+			int64_t nextSize = (int64_t)frameSizes.back() + delta;
+			if (nextSize < 0) return false;
+			frameSizes.push_back((size_t)nextSize);
+		}
+	} else {
+		return false;
+	}
+
+	size_t remaining = payloadEnd - p;
+	size_t sumKnown = 0;
+	for (size_t i = 0; i < frameSizes.size(); i++) {
+		sumKnown += frameSizes[i];
+		if (sumKnown > remaining) return false;
+	}
+	if ((size_t)laceCount < frameSizes.size()) return false;
+	if (remaining < sumKnown) return false;
+	frameSizes.push_back(remaining - sumKnown);
+
+	size_t cursor = 0;
+	for (size_t i = 0; i < frameSizes.size(); i++) {
+		size_t sz = frameSizes[i];
+		if (cursor + sz > remaining) return false;
+		if (sz > 0) {
+			EncodedFrame frame;
+			frame.offset = (long)(p + cursor);
+			frame.size = (uint32_t)sz;
+			frame.pts = pts + ((double)i * 1e-6);
+			outFrames->push_back(frame);
+			pushed += 1;
+		}
+		cursor += sz;
+	}
+
+	if (outPushedFrames) *outPushedFrames = pushed;
 	return true;
 }
 
-static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outFps, std::vector<EncodedFrame>* outFrames, double* outDuration) {
+static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outFps, std::vector<EncodedFrame>* outFrames, double* outDuration,
+	bool* outHasAudio, std::string* outAudioCodec, double* outAudioSampleRate, int* outAudioChannels,
+	std::vector<EncodedFrame>* outAudioPackets) {
 	std::vector<unsigned char> fileData;
 	if (!ReadFileBytes(path, &fileData)) return false;
 
@@ -308,10 +448,22 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 
 	uint64_t timecodeScale = 1000000ULL;
 	uint64_t videoTrack = 0;
+	uint64_t audioTrack = 0;
 	double fps = 0.0;
 	int width = 0;
 	int height = 0;
+	bool hasAudio = false;
+	std::string audioCodec;
+	double audioSampleRate = 0.0;
+	int audioChannels = 0;
+	double audioFirstPacketTime = 0.0;
+	double audioLastPacketTime = 0.0;
+	bool sawAudioPacket = false;
 	std::vector<EncodedFrame> frames;
+	std::vector<EncodedFrame> audioPackets;
+	size_t malformedBlocks = 0;
+	size_t lacedBlocks = 0;
+	size_t lacedFrames = 0;
 
 	pos = segmentStart;
 	while (pos < segmentEnd) {
@@ -362,6 +514,8 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 					uint64_t defaultDuration = 0;
 					int tw = 0;
 					int th = 0;
+					double asr = 0.0;
+					int ach = 0;
 
 					size_t tp = s;
 					while (tp < e) {
@@ -404,6 +558,26 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 								}
 								vp = vpe;
 							}
+						} else if (tid == 0xE1ULL) {
+							size_t ap = ts;
+							while (ap < te) {
+								uint64_t aid = 0;
+								uint64_t asz = 0;
+								bool aunk = false;
+								if (!ReadEBMLVint(fileData, &ap, 4, false, &aid, nullptr, nullptr)) break;
+								if (!ReadEBMLVint(fileData, &ap, 8, true, &asz, nullptr, &aunk)) break;
+								size_t aps = ap;
+								size_t ape = aunk ? te : (aps + (size_t)asz);
+								if (ape > te) break;
+								if (aid == 0xB5ULL && (asz == 4 || asz == 8)) {
+									asr = ReadBigEndianFloat(&fileData[aps], (size_t)asz);
+								} else if (aid == 0x9FULL && asz > 0 && asz <= 8) {
+									uint64_t v = 0;
+									for (size_t i = 0; i < (size_t)asz; i++) v = (v << 8) | fileData[aps + i];
+									ach = (int)v;
+								}
+								ap = ape;
+							}
 						}
 
 						tp = te;
@@ -414,6 +588,12 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 						if (tw > 0) width = tw;
 						if (th > 0) height = th;
 						if (defaultDuration > 0) fps = 1000000000.0 / (double)defaultDuration;
+					} else if (tt == 2) {
+						hasAudio = true;
+						if (audioTrack == 0) audioTrack = tn;
+						if (!codec.empty()) audioCodec = codec;
+						if (asr > 0.0) audioSampleRate = asr;
+						if (ach > 0) audioChannels = ach;
 					}
 				}
 				p = e;
@@ -439,7 +619,28 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 					clusterTimecode = 0;
 					for (size_t i = 0; i < (size_t)sz; i++) clusterTimecode = (clusterTimecode << 8) | fileData[s + i];
 				} else if (id == 0xA3ULL) {
-					ParseSimpleBlock(fileData, s, (size_t)sz, clusterTimecode, timecodeScale, videoTrack, &frames);
+					size_t pushed = 0;
+					bool usedLacing = false;
+					if (!ParseSimpleBlock(fileData, s, (size_t)sz, clusterTimecode, timecodeScale, videoTrack, &frames, &pushed, &usedLacing)) {
+						malformedBlocks += 1;
+					} else if (usedLacing) {
+						lacedBlocks += 1;
+						lacedFrames += pushed;
+					}
+					if (audioTrack != 0) {
+						size_t apushed = 0;
+						bool alacing = false;
+						if (ParseSimpleBlock(fileData, s, (size_t)sz, clusterTimecode, timecodeScale, audioTrack, &audioPackets, &apushed, &alacing)) {
+							if (apushed > 0) {
+								size_t first = audioPackets.size() - apushed;
+								if (!sawAudioPacket) {
+									audioFirstPacketTime = audioPackets[first].pts;
+									sawAudioPacket = true;
+								}
+								audioLastPacketTime = audioPackets.back().pts;
+							}
+						}
+					}
 				} else if (id == 0xA0ULL) {
 					size_t bg = s;
 					while (bg < e) {
@@ -452,7 +653,28 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 						size_t be = bunk ? e : (bs + (size_t)bsz);
 						if (be > e) break;
 						if (bid == 0xA1ULL) {
-							ParseSimpleBlock(fileData, bs, (size_t)bsz, clusterTimecode, timecodeScale, videoTrack, &frames);
+							size_t pushed = 0;
+							bool usedLacing = false;
+							if (!ParseSimpleBlock(fileData, bs, (size_t)bsz, clusterTimecode, timecodeScale, videoTrack, &frames, &pushed, &usedLacing)) {
+								malformedBlocks += 1;
+							} else if (usedLacing) {
+								lacedBlocks += 1;
+								lacedFrames += pushed;
+							}
+							if (audioTrack != 0) {
+								size_t apushed = 0;
+								bool alacing = false;
+								if (ParseSimpleBlock(fileData, bs, (size_t)bsz, clusterTimecode, timecodeScale, audioTrack, &audioPackets, &apushed, &alacing)) {
+									if (apushed > 0) {
+										size_t first = audioPackets.size() - apushed;
+										if (!sawAudioPacket) {
+											audioFirstPacketTime = audioPackets[first].pts;
+											sawAudioPacket = true;
+										}
+										audioLastPacketTime = audioPackets.back().pts;
+									}
+								}
+							}
 						}
 						bg = be;
 					}
@@ -466,7 +688,18 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 		pos = payloadEnd;
 	}
 
-	if (videoTrack == 0 || width <= 0 || height <= 0 || frames.empty()) return false;
+	if (videoTrack == 0) {
+		TraceLog(LOG_WARNING, "LoadVideoStream: WebM parse failed: no VP8 video track found");
+		return false;
+	}
+	if (width <= 0 || height <= 0) {
+		TraceLog(LOG_WARNING, "LoadVideoStream: WebM parse failed: invalid video dimensions");
+		return false;
+	}
+	if (frames.empty()) {
+		TraceLog(LOG_WARNING, "LoadVideoStream: WebM parse failed: no VP8 frames (malformed blocks: %zu)", malformedBlocks);
+		return false;
+	}
 
 	std::sort(frames.begin(), frames.end(), [](const EncodedFrame& a, const EncodedFrame& b) {
 		return a.pts < b.pts;
@@ -477,12 +710,32 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 		if (span > 0.0) fps = (double)(frames.size() - 1) / span;
 	}
 	if (fps <= 0.0) fps = 30.0;
+	if (!audioPackets.empty()) {
+		std::sort(audioPackets.begin(), audioPackets.end(), [](const EncodedFrame& a, const EncodedFrame& b) {
+			return a.pts < b.pts;
+		});
+	}
 
 	*outW = width;
 	*outH = height;
 	*outFps = fps;
 	*outFrames = frames;
 	*outDuration = frames.back().pts + (1.0 / fps);
+	if (outHasAudio) *outHasAudio = hasAudio;
+	if (outAudioCodec) *outAudioCodec = audioCodec;
+	if (outAudioSampleRate) *outAudioSampleRate = audioSampleRate;
+	if (outAudioChannels) *outAudioChannels = audioChannels;
+	if (outAudioPackets) *outAudioPackets = audioPackets;
+	if (outHasAudio && *outHasAudio && outAudioSampleRate && *outAudioSampleRate <= 0.0 && fps > 0.0) {
+		// Keep fields consistent for scripts even when container omits explicit audio sampling metadata.
+		*outAudioSampleRate = 0.0;
+	}
+	if (lacedBlocks > 0) {
+		TraceLog(LOG_INFO, "LoadVideoStream: WebM parser accepted %zu laced blocks (%zu decoded frame packets)", lacedBlocks, lacedFrames);
+	}
+	if (hasAudio && !audioPackets.empty()) {
+		TraceLog(LOG_INFO, "LoadVideoStream: WebM parser indexed %zu audio packets (first=%.3f, last=%.3f)", audioPackets.size(), audioFirstPacketTime, audioLastPacketTime);
+	}
 	return true;
 }
 
@@ -595,15 +848,36 @@ static bool RewindDesktopVideo(VideoPlayerState* state) {
 static bool DecodeFrameAtIndex(VideoPlayerState* state, size_t idx) {
 	if (!state || !state->fp || !state->codecInited || idx >= state->frames.size()) return false;
 	const EncodedFrame& f = state->frames[idx];
-	if (fseek(state->fp, f.offset, SEEK_SET) != 0) return false;
+	if (fseek(state->fp, f.offset, SEEK_SET) != 0) {
+		state->lastError = "seek failed while decoding video frame";
+		return false;
+	}
 
 	std::vector<unsigned char> packet(f.size);
-	if (fread(packet.data(), 1, f.size, state->fp) != f.size) return false;
-	if (vpx_codec_decode(&state->codec, packet.data(), (unsigned int)packet.size(), nullptr, 0) != VPX_CODEC_OK) return false;
+	if (fread(packet.data(), 1, f.size, state->fp) != f.size) {
+		state->lastError = "read failed while decoding video frame";
+		return false;
+	}
+	vpx_codec_err_t err = vpx_codec_decode(&state->codec, packet.data(), (unsigned int)packet.size(), nullptr, 0);
+	if (err != VPX_CODEC_OK) {
+		const char* detail = vpx_codec_error_detail(&state->codec);
+		TraceLog(LOG_WARNING, "LoadVideoStream: VP8 decode error at frame %zu: %s%s%s",
+			idx,
+			vpx_codec_err_to_string(err),
+			detail ? " - " : "",
+			detail ? detail : "");
+		state->lastError = std::string("VP8 decode error at frame ") + std::to_string(idx) + ": " + vpx_codec_err_to_string(err) + (detail ? std::string(" - ") + detail : std::string());
+		return false;
+	}
 
 	vpx_codec_iter_t iter = nullptr;
 	const vpx_image_t* img = vpx_codec_get_frame(&state->codec, &iter);
-	if (!img) return false;
+	if (!img) {
+		TraceLog(LOG_WARNING, "LoadVideoStream: VP8 decode produced no frame at index %zu", idx);
+		state->lastError = std::string("VP8 decode produced no frame at index ") + std::to_string(idx);
+		return false;
+	}
+	state->lastError.clear();
 
 	ConvertI420ToRGBA(img, state->rgba);
 	if (state->texture.id != 0 && !state->rgba.empty()) UpdateTexture(state->texture, state->rgba.data());
@@ -618,9 +892,67 @@ static bool DecodeFrameAtIndex(VideoPlayerState* state, size_t idx) {
 	return true;
 }
 
+static void InitializeDesktopAudioDecodeScaffold(VideoPlayerState* state) {
+	if (!state) return;
+	state->audioDecodeScaffoldReady = false;
+	state->audioDecodePath.clear();
+	state->audioPacketsRead = 0;
+	state->audioBytesRead = 0;
+	state->audioLastReadPacketTime = 0.0;
+#if HAVE_LIBVPX
+	state->nextAudioPacketIndex = 0;
+	if (state->webPlayer) return;
+	if (!state->hasAudio) return;
+	if (state->audioPackets.empty()) return;
+	if (state->audioCodecName == "A_VORBIS") {
+		state->audioDecodeScaffoldReady = true;
+		state->audioDecodePath = "vorbis-packet-reader";
+	}
+#endif
+}
+
+static bool ReadDesktopAudioPacketAtIndex(VideoPlayerState* state, size_t idx, std::vector<unsigned char>* outPacket) {
+	if (!state || !outPacket || !state->fp) return false;
+	if (idx >= state->audioPackets.size()) return false;
+	const EncodedFrame& p = state->audioPackets[idx];
+	if (fseek(state->fp, p.offset, SEEK_SET) != 0) {
+		state->lastError = "seek failed while reading audio packet";
+		return false;
+	}
+	outPacket->assign((size_t)p.size, 0);
+	if (p.size > 0 && fread(outPacket->data(), 1, p.size, state->fp) != p.size) {
+		state->lastError = "read failed while reading audio packet";
+		return false;
+	}
+	state->lastError.clear();
+	return true;
+}
+
+static int StepDesktopAudioDecodeScaffold(VideoPlayerState* state, int maxPackets) {
+	if (!state || !state->audioDecodeScaffoldReady) return 0;
+	if (maxPackets <= 0) return 0;
+	int readCount = 0;
+	std::vector<unsigned char> packet;
+	while (readCount < maxPackets && state->nextAudioPacketIndex < state->audioPackets.size()) {
+		if (!ReadDesktopAudioPacketAtIndex(state, state->nextAudioPacketIndex, &packet)) {
+			break;
+		}
+		state->audioPacketsRead += 1;
+		state->audioBytesRead += (uint64_t)packet.size();
+		state->audioLastReadPacketTime = state->audioPackets[state->nextAudioPacketIndex].pts;
+		state->nextAudioPacketIndex += 1;
+		readCount += 1;
+	}
+	return readCount;
+}
+
 static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	FILE* fp = fopen(path, "rb");
-	if (!fp) return nullptr;
+	if (!fp) {
+		gLastVideoLoadError = std::string("could not open file: ") + path;
+		return nullptr;
+	}
+	gLastVideoLoadError.clear();
 
 	VideoPlayerState* state = new VideoPlayerState();
 	state->path = path;
@@ -636,7 +968,12 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	int webmH = 0;
 	double webmFps = 0.0;
 	double webmDuration = 0.0;
+	bool webmHasAudio = false;
+	std::string webmAudioCodec;
+	double webmAudioSampleRate = 0.0;
+	int webmAudioChannels = 0;
 	std::vector<EncodedFrame> webmFrames;
+	std::vector<EncodedFrame> webmAudioPackets;
 
 	bool loaded = BuildIVFFrameIndex(fp, &ivfFrames, &ivfW, &ivfH, &ivfFps, &ivfDuration);
 	if (loaded) {
@@ -647,7 +984,8 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 		state->frameRate = ivfFps;
 		state->timeLength = ivfDuration;
 		state->frames = ivfFrames;
-	} else if (ParseWebMFrames(path, &webmW, &webmH, &webmFps, &webmFrames, &webmDuration)) {
+	} else if (ParseWebMFrames(path, &webmW, &webmH, &webmFps, &webmFrames, &webmDuration,
+		&webmHasAudio, &webmAudioCodec, &webmAudioSampleRate, &webmAudioChannels, &webmAudioPackets)) {
 		state->container = "webm";
 		state->codecName = "vp8";
 		state->width = webmW;
@@ -655,8 +993,19 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 		state->frameRate = webmFps;
 		state->timeLength = webmDuration;
 		state->frames = webmFrames;
+		state->hasAudio = webmHasAudio;
+		state->audioCodecName = webmAudioCodec;
+		state->audioSampleRate = webmAudioSampleRate;
+		state->audioChannels = webmAudioChannels;
+		state->audioPackets = webmAudioPackets;
+		state->audioPacketCount = (uint32_t)state->audioPackets.size();
+		if (!state->audioPackets.empty()) {
+			state->audioFirstPacketTime = state->audioPackets.front().pts;
+			state->audioLastPacketTime = state->audioPackets.back().pts;
+		}
 	} else {
 		TraceLog(LOG_WARNING, "LoadVideoStream: desktop expects VP8 in IVF or WebM (V_VP8) container");
+		gLastVideoLoadError = "desktop expects VP8 in IVF or WebM (V_VP8) container";
 		fclose(fp);
 		delete state;
 		return nullptr;
@@ -666,12 +1015,14 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	state->texture = LoadTextureFromImage(blank);
 	UnloadImage(blank);
 	if (state->texture.id == 0) {
+		gLastVideoLoadError = "failed to create video texture";
 		fclose(fp);
 		delete state;
 		return nullptr;
 	}
 
 	if (!InitDecoder(state)) {
+		gLastVideoLoadError = "failed to initialize VP8 decoder";
 		UnloadTexture(state->texture);
 		fclose(fp);
 		delete state;
@@ -682,6 +1033,8 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	state->rgba.resize((size_t)state->width * (size_t)state->height * 4u);
 	state->playBaseClock = GetTime();
 	state->playBaseTime = 0.0;
+	state->lastError.clear();
+	InitializeDesktopAudioDecodeScaffold(state);
 	state->valid = true;
 	return state;
 }
@@ -733,7 +1086,11 @@ static VideoPlayerState* LoadWebVideo(const char* path) {
 	int height = 0;
 	double duration = 0.0;
 	int handle = WebVideoLoad(path, &width, &height, &duration);
-	if (handle <= 0 || width <= 0 || height <= 0) return nullptr;
+	if (handle <= 0 || width <= 0 || height <= 0) {
+		gLastVideoLoadError = "web backend failed to load video metadata";
+		return nullptr;
+	}
+	gLastVideoLoadError.clear();
 
 	VideoPlayerState* state = new VideoPlayerState();
 	state->path = path;
@@ -751,11 +1108,13 @@ static VideoPlayerState* LoadWebVideo(const char* path) {
 	state->texture = LoadTextureFromImage(blank);
 	UnloadImage(blank);
 	if (state->texture.id == 0) {
+		gLastVideoLoadError = "failed to create video texture";
 		DestroyVideoPlayer(state);
 		return nullptr;
 	}
 
 	state->rgba.resize((size_t)state->width * (size_t)state->height * 4u);
+	state->lastError.clear();
 	state->valid = true;
 	return state;
 }
@@ -1046,6 +1405,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("timeLength"), Value(state->timeLength));
 		info.SetValue(String("playbackRate"), Value(state->playbackRate));
 		info.SetValue(String("looping"), Value(state->looping ? 1 : 0));
+		info.SetValue(String("hasAudio"), Value(state->hasAudio ? 1 : 0));
+		info.SetValue(String("audioCodec"), Value(String(state->audioCodecName.c_str())));
+		info.SetValue(String("audioSampleRate"), Value(state->audioSampleRate));
+		info.SetValue(String("audioChannels"), Value(state->audioChannels));
+		info.SetValue(String("audioPacketCount"), Value((int)state->audioPacketCount));
+		info.SetValue(String("audioFirstPacketTime"), Value(state->audioFirstPacketTime));
+		info.SetValue(String("audioLastPacketTime"), Value(state->audioLastPacketTime));
 		info.SetValue(String("isWebBackend"), Value(state->webPlayer ? 1 : 0));
 		return IntrinsicResult(Value(info));
 	};
@@ -1069,6 +1435,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("timeLength"), Value(state->timeLength));
 		info.SetValue(String("playbackRate"), Value(state->playbackRate));
 		info.SetValue(String("looping"), Value(state->looping ? 1 : 0));
+		info.SetValue(String("hasAudio"), Value(state->hasAudio ? 1 : 0));
+		info.SetValue(String("audioCodec"), Value(String(state->audioCodecName.c_str())));
+		info.SetValue(String("audioSampleRate"), Value(state->audioSampleRate));
+		info.SetValue(String("audioChannels"), Value(state->audioChannels));
+		info.SetValue(String("audioPacketCount"), Value((int)state->audioPacketCount));
+		info.SetValue(String("audioFirstPacketTime"), Value(state->audioFirstPacketTime));
+		info.SetValue(String("audioLastPacketTime"), Value(state->audioLastPacketTime));
 		info.SetValue(String("isWebBackend"), Value(state->webPlayer ? 1 : 0));
 		return IntrinsicResult(Value(info));
 	};
@@ -1082,6 +1455,97 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		return IntrinsicResult(Value(String(state->webPlayer ? "web" : "desktop")));
 	};
 	raylibModule.SetValue("GetVideoBackend", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video", Value::null);
+	i->code = INTRINSIC_LAMBDA {
+		Value videoVal = context->GetVar(String("video"));
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
+		if (state && state->valid) {
+			return IntrinsicResult(Value(String(state->lastError.c_str())));
+		}
+		return IntrinsicResult(Value(String(gLastVideoLoadError.c_str())));
+	};
+	raylibModule.SetValue("GetVideoLastError", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+
+		ValueDict info;
+		info.SetValue(String("hasAudio"), Value(state->hasAudio ? 1 : 0));
+		info.SetValue(String("packetCount"), Value((int)state->audioPacketCount));
+		info.SetValue(String("firstPacketTime"), Value(state->audioFirstPacketTime));
+		info.SetValue(String("lastPacketTime"), Value(state->audioLastPacketTime));
+
+		double span = 0.0;
+		double minDelta = 0.0;
+		double maxDelta = 0.0;
+		double avgDelta = 0.0;
+		int nonMonotonicCount = 0;
+		if (state->audioPackets.size() >= 2) {
+			bool firstDelta = true;
+			double sumDelta = 0.0;
+			for (size_t i = 1; i < state->audioPackets.size(); i++) {
+				double d = state->audioPackets[i].pts - state->audioPackets[i - 1].pts;
+				if (d < 0.0) nonMonotonicCount += 1;
+				if (firstDelta) {
+					minDelta = d;
+					maxDelta = d;
+					firstDelta = false;
+				} else {
+					if (d < minDelta) minDelta = d;
+					if (d > maxDelta) maxDelta = d;
+				}
+				sumDelta += d;
+			}
+			avgDelta = sumDelta / (double)(state->audioPackets.size() - 1);
+			span = state->audioPackets.back().pts - state->audioPackets.front().pts;
+		}
+
+		info.SetValue(String("packetSpan"), Value(span));
+		info.SetValue(String("minDelta"), Value(minDelta));
+		info.SetValue(String("maxDelta"), Value(maxDelta));
+		info.SetValue(String("avgDelta"), Value(avgDelta));
+		info.SetValue(String("nonMonotonicCount"), Value(nonMonotonicCount));
+		info.SetValue(String("isMonotonic"), Value(nonMonotonicCount == 0 ? 1 : 0));
+		return IntrinsicResult(Value(info));
+	};
+	raylibModule.SetValue("GetVideoAudioIndexDiagnostics", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
+	i->AddParam("maxPackets", Value(1));
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+		int maxPackets = context->GetVar(String("maxPackets")).IntValue();
+		if (maxPackets < 1) maxPackets = 1;
+		if (maxPackets > 1024) maxPackets = 1024;
+
+#ifdef PLATFORM_WEB
+		(void)maxPackets;
+		return IntrinsicResult::Null;
+#else
+		if (state->webPlayer) return IntrinsicResult::Null;
+		int readCount = StepDesktopAudioDecodeScaffold(state, maxPackets);
+
+		ValueDict info;
+		info.SetValue(String("supported"), Value(state->audioDecodeScaffoldReady ? 1 : 0));
+		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
+		info.SetValue(String("decodePath"), Value(String(state->audioDecodePath.c_str())));
+		info.SetValue(String("readCount"), Value(readCount));
+		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
+		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
+		info.SetValue(String("lastReadPacketTime"), Value(state->audioLastReadPacketTime));
+		info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
+		return IntrinsicResult(Value(info));
+#endif
+	};
+	raylibModule.SetValue("StepVideoAudioDecodeScaffold", i->GetFunc());
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");

@@ -19,3 +19,20 @@ ln -s ../miniscript/MiniScript-cpp/src/MiniScript MiniScript
 5. Build raylib-miniscript with `scripts/build-desktop.sh`
 6. Run with `build/miniscript-raylib`.  This will look for `assets/main.ms`, unless you specify some other script file for it to launch.
 
+## Smoke Tests
+
+Desktop builds now include a VP8 video smoke test entry in CTest.
+
+From the repo root:
+
+```bash
+cmake -S . -B build
+cmake --build build
+cd build
+ctest -R vp8_smokes --output-on-failure
+```
+
+Notes:
+- This smoke opens a raylib window and is intended for local GUI environments.
+- You can disable registration with `-DENABLE_VP8_SMOKE_TESTS=OFF` when configuring CMake.
+

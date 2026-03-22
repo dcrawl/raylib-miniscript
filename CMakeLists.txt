@@ -4,6 +4,8 @@ project(raylib-miniscript VERSION 0.1.0 LANGUAGES C CXX)
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+include(CTest)
+
 # MiniScript source files
 set(MINISCRIPT_SOURCES
     MiniScript/Dictionary.cpp
@@ -203,6 +205,20 @@ else()
         ${CMAKE_BINARY_DIR}/assets
         COMMENT "Copying assets to build directory"
     )
+
+    option(ENABLE_VP8_SMOKE_TESTS "Enable VP8 smoke tests in CTest" ON)
+    if(BUILD_TESTING AND ENABLE_VP8_SMOKE_TESTS)
+        add_test(
+            NAME vp8_smokes
+            COMMAND /usr/bin/env bash ${CMAKE_SOURCE_DIR}/scripts/run-vp8-smokes.sh $<TARGET_FILE:raylib-miniscript>
+        )
+        set_tests_properties(vp8_smokes PROPERTIES
+            LABELS "smoke;video"
+            TIMEOUT 300
+            RUN_SERIAL TRUE
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        )
+    endif()
 
     message(STATUS "raylib-miniscript Configuration: Desktop")
     message(STATUS "  Platform: ${CMAKE_SYSTEM_NAME}")

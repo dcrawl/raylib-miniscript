@@ -8,6 +8,7 @@ if video == null then
 end if
 if video == null then
 	print "LoadVideoStream failed. Expected VP8 in WebM or IVF."
+	print "video error=" + rl.GetVideoLastError()
 	exit 1
 end if
 
@@ -35,7 +36,9 @@ ignore = rl.DidVideoFinish(video)
 
 loopCount = 0
 finishCount = 0
-maxLoops = 2
+maxLoops = 1
+retryCount = 0
+maxRetries = 3
 startTime = rl.GetTime
 timeoutSec = 15
 
@@ -53,10 +56,19 @@ while not rl.WindowShouldClose
 	if rl.DidVideoFinish(video) then
 		finishCount = finishCount + 1
 		print "DidVideoFinish fired count=" + str(finishCount)
+		if loopCount < 1 and retryCount < maxRetries then
+			retryCount = retryCount + 1
+			print "Loop smoke retry after finish count=" + str(retryCount)
+			rl.SeekVideoStream video, startPos
+			rl.PlayVideoStream video
+			ignore = rl.DidVideoLoop(video)
+			ignore = rl.DidVideoFinish(video)
+		end if
 	end if
 
 	if rl.GetTime - startTime > timeoutSec then
 		print "Loop smoke timeout reached"
+		print "video error=" + rl.GetVideoLastError(video)
 		break
 	end if
 

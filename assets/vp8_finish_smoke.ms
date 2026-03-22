@@ -8,6 +8,7 @@ if video == null then
 end if
 if video == null then
 	print "LoadVideoStream failed. Expected VP8 in WebM or IVF."
+	print "video error=" + rl.GetVideoLastError()
 	exit 1
 end if
 
@@ -54,6 +55,7 @@ while not rl.WindowShouldClose
 
 	if rl.GetTime - startTime > timeoutSec then
 		print "Finish smoke timeout reached"
+		print "video error=" + rl.GetVideoLastError(video)
 		break
 	end if
 

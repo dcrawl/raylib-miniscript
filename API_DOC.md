@@ -808,7 +808,7 @@
 
 |Name | Parameters | Purpose |
 |-----|------------|---------|
-|LoadVideoStream |**fileName** |Load a video stream into a VideoPlayer object (desktop: VP8 in IVF via libvpx; web: browser media stack, e.g. .webm) |
+|LoadVideoStream |**fileName** |Load a video stream into a VideoPlayer object (desktop: VP8 in IVF and WebM via libvpx + native demux; web: browser media stack, e.g. .webm) |
 |IsVideoStreamValid |**video** |Check if a video player handle is valid |
 |PlayVideoStream |**video** |Start or restart video playback |
 |PauseVideoStream |**video** |Pause video playback |
@@ -820,9 +820,12 @@
 |GetVideoTimeLength |**video** |Get total video duration in seconds |
 |GetVideoTimePlayed |**video** |Get current playback time in seconds |
 |GetVideoTexture |**video** |Get current video frame texture for DrawTexture/DrawTexturePro |
-|GetVideoInfo |**video** |Get video metadata map: path, container, codec, width, height, frameRate, frameCount, timeLength, playbackRate, looping, isWebBackend |
+|GetVideoInfo |**video** |Get video metadata map: path, container, codec, width, height, frameRate, frameCount, timeLength, playbackRate, looping, hasAudio, audioCodec, audioSampleRate, audioChannels, audioPacketCount, audioFirstPacketTime, audioLastPacketTime, isWebBackend |
 |GetVideoMetadata |**video** |Alias of GetVideoInfo |
 |GetVideoBackend |**video** |Get active backend name as string: `desktop` or `web` |
+|GetVideoLastError |**video**=null |Get last diagnostic error string (per-player decode/runtime error when video is provided; otherwise returns last load error) |
+|GetVideoAudioIndexDiagnostics |**video** |Get audio packet index diagnostics map: hasAudio, packetCount, firstPacketTime, lastPacketTime, packetSpan, minDelta, maxDelta, avgDelta, nonMonotonicCount, isMonotonic |
+|StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map |
 |SetVideoLooping |**video**, **enabled**=1 |Enable/disable video looping |
 |GetVideoLooping |**video** |Get current looping mode (1/0) |
 |SetVideoPlaybackRate |**video**, **rate**=1.0 |Set playback rate (clamped 0.05..4.0) |
@@ -834,4 +837,21 @@
 Notes:
 - Keep calling `UpdateVideoStream` in your loop; video decode/upload is incremental and does not halt MiniScript execution.
 - On web builds, audio playback is driven by the browser video element; the same MiniScript API is used.
-- Desktop currently decodes VP8 from IVF container; use `.ivf` assets there until WebM demux is added to native backend.
+- Desktop decodes VP8 from IVF and WebM containers; unsupported/invalid WebM block layouts are reported through runtime warnings.
+- `StepVideoAudioDecodeScaffold` is intentionally a scaffolding API: it only reads encoded audio packets (no audio playback/sync yet).
+
+MiniScript helper example (standard load + diagnostics):
+
+```miniscript
+loadVideoOrFail = function(path)
+	v = raylib.LoadVideoStream(path)
+	if v == null then
+		print "video load failed: " + raylib.GetVideoLastError()
+		return null
+	end if
+	return v
+end function
+
+video = loadVideoOrFail("assets/EmberfallMovie.webm")
+if video == null then exit 1
+```
