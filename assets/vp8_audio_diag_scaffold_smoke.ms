@@ -40,6 +40,7 @@ decodeBatch = null
 resetState = null
 staleDecode = null
 staleBatch = null
+staleStep = null
 if step == null then
 	print "Audio diag/scaffold smoke failed: scaffold result is null"
 	rl.UnloadVideoStream video
@@ -280,6 +281,28 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+
+	staleStep = rl.StepVideoAudioDecodeScaffold(video, 2, decodeStub.decodeSessionId)
+	if staleStep == null then
+		print "Audio diag/scaffold smoke failed: stale step session guard returned null"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleStep.status != "session-mismatch" then
+		print "Audio diag/scaffold smoke failed: stale step expected session-mismatch"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleStep.readCount != 0 then
+		print "Audio diag/scaffold smoke failed: stale step should not read packets"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleStep.decodeSessionId != resetState.decodeSessionId then
+		print "Audio diag/scaffold smoke failed: stale step should report current session id"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
@@ -303,6 +326,9 @@ if staleDecode != null then
 end if
 if staleBatch != null then
 	print "audio decode stale batch guard: status=" + staleBatch[0].status + " consumed=" + str(staleBatch[0].consumedPacket) + " sessionId=" + str(staleBatch[0].decodeSessionId)
+end if
+if staleStep != null then
+	print "audio decode stale step guard: status=" + staleStep.status + " readCount=" + str(staleStep.readCount) + " sessionId=" + str(staleStep.decodeSessionId)
 end if
 
 rl.UnloadVideoStream video

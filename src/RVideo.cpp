@@ -1738,24 +1738,65 @@ void AddRVideoMethods(ValueDict raylibModule) {
 	i = Intrinsic::Create("");
 	i->AddParam("video");
 	i->AddParam("maxPackets", Value(1));
+	i->AddParam("expectedSessionId", Value::zero);
 	i->code = INTRINSIC_LAMBDA {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		int maxPackets = context->GetVar(String("maxPackets")).IntValue();
+		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
 		if (maxPackets < 1) maxPackets = 1;
 		if (maxPackets > 1024) maxPackets = 1024;
 
 #ifdef PLATFORM_WEB
 		(void)maxPackets;
+		(void)expectedSessionId;
 		return IntrinsicResult::Null;
 #else
 		if (state->webPlayer) return IntrinsicResult::Null;
-		int readCount = StepDesktopAudioDecodeScaffold(state, maxPackets);
-
 		ValueDict info;
+		info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
 		info.SetValue(String("supported"), Value(state->audioDecodeScaffoldReady ? 1 : 0));
 		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
 		info.SetValue(String("decodePath"), Value(String(state->audioDecodePath.c_str())));
+		if (expectedSessionId > 0 && expectedSessionId != (int)state->audioDecodeSessionId) {
+			info.SetValue(String("readCount"), Value::zero);
+			info.SetValue(String("status"), Value(String("session-mismatch")));
+			info.SetValue(String("message"), Value(String("stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession")));
+			info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
+			info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+			info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
+			info.SetValue(String("lastReadPacketTime"), Value(state->audioLastReadPacketTime));
+			info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
+			info.SetValue(String("vorbisHeaderParseAttempted"), Value(state->vorbisHeaderParseAttempted ? 1 : 0));
+			info.SetValue(String("vorbisIdentificationSeen"), Value(state->vorbisIdentificationSeen ? 1 : 0));
+			info.SetValue(String("vorbisCommentSeen"), Value(state->vorbisCommentSeen ? 1 : 0));
+			info.SetValue(String("vorbisSetupSeen"), Value(state->vorbisSetupSeen ? 1 : 0));
+			bool guardVorbisHeadersReady = (state->vorbisIdentificationSeen && state->vorbisCommentSeen && state->vorbisSetupSeen);
+			info.SetValue(String("vorbisHeadersReady"), Value(guardVorbisHeadersReady ? 1 : 0));
+			info.SetValue(String("vorbisParsedChannels"), Value(state->vorbisParsedChannels));
+			info.SetValue(String("vorbisParsedSampleRate"), Value(state->vorbisParsedSampleRate));
+			const char* guardHeaderSource = "none";
+			if (state->vorbisHeadersFromCodecPrivate && state->vorbisHeadersFromPacketStream) {
+				guardHeaderSource = "codecPrivate+packet";
+			} else if (state->vorbisHeadersFromCodecPrivate) {
+				guardHeaderSource = "codecPrivate";
+			} else if (state->vorbisHeadersFromPacketStream) {
+				guardHeaderSource = "packet";
+			}
+			info.SetValue(String("vorbisHeaderSource"), Value(String(guardHeaderSource)));
+			std::string guardMissingHeaders;
+			if (!state->vorbisIdentificationSeen) guardMissingHeaders += "identification ";
+			if (!state->vorbisCommentSeen) guardMissingHeaders += "comment ";
+			if (!state->vorbisSetupSeen) guardMissingHeaders += "setup ";
+			if (!guardMissingHeaders.empty() && guardMissingHeaders.back() == ' ') guardMissingHeaders.pop_back();
+			info.SetValue(String("vorbisMissingHeaders"), Value(String(guardMissingHeaders.c_str())));
+			int guardReadyForDecode = 0;
+			if (state->audioDecodeScaffoldReady && state->audioCodecName == "A_VORBIS" && guardVorbisHeadersReady) guardReadyForDecode = 1;
+			info.SetValue(String("readyForDecode"), Value(guardReadyForDecode));
+			return IntrinsicResult(Value(info));
+		}
+
+		int readCount = StepDesktopAudioDecodeScaffold(state, maxPackets);
 		info.SetValue(String("readCount"), Value(readCount));
 		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
