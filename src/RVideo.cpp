@@ -1818,10 +1818,74 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("packetBytes"), Value((int)packetBytes));
 		info.SetValue(String("status"), Value(String("decode-not-wired")));
 		info.SetValue(String("message"), Value(String("packet consumed; decoder internals not yet wired")));
+		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
+		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
 		return IntrinsicResult(Value(info));
 #endif
 	};
 	raylibModule.SetValue("DecodeVideoAudioPacket", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+
+		ValueDict info;
+		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
+		info.SetValue(String("decodePath"), Value(String(state->audioDecodePath.c_str())));
+		int supported = state->audioDecodeScaffoldReady ? 1 : 0;
+		int ready = IsAudioDecodeReady(state) ? 1 : 0;
+		int remaining = (int)(state->audioPackets.size() - state->nextAudioPacketIndex);
+		if (remaining < 0) remaining = 0;
+		info.SetValue(String("supported"), Value(supported));
+		info.SetValue(String("readyForDecode"), Value(ready));
+		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
+		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
+		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("remainingPackets"), Value(remaining));
+		info.SetValue(String("lastReadPacketTime"), Value(state->audioLastReadPacketTime));
+		info.SetValue(String("vorbisHeaderParseAttempted"), Value(state->vorbisHeaderParseAttempted ? 1 : 0));
+		info.SetValue(String("vorbisIdentificationSeen"), Value(state->vorbisIdentificationSeen ? 1 : 0));
+		info.SetValue(String("vorbisCommentSeen"), Value(state->vorbisCommentSeen ? 1 : 0));
+		info.SetValue(String("vorbisSetupSeen"), Value(state->vorbisSetupSeen ? 1 : 0));
+		bool vorbisHeadersReady = (state->vorbisIdentificationSeen && state->vorbisCommentSeen && state->vorbisSetupSeen);
+		info.SetValue(String("vorbisHeadersReady"), Value(vorbisHeadersReady ? 1 : 0));
+		const char* headerSource = "none";
+		if (state->vorbisHeadersFromCodecPrivate && state->vorbisHeadersFromPacketStream) {
+			headerSource = "codecPrivate+packet";
+		} else if (state->vorbisHeadersFromCodecPrivate) {
+			headerSource = "codecPrivate";
+		} else if (state->vorbisHeadersFromPacketStream) {
+			headerSource = "packet";
+		}
+		info.SetValue(String("vorbisHeaderSource"), Value(String(headerSource)));
+		std::string missingHeaders;
+		if (!state->vorbisIdentificationSeen) missingHeaders += "identification ";
+		if (!state->vorbisCommentSeen) missingHeaders += "comment ";
+		if (!state->vorbisSetupSeen) missingHeaders += "setup ";
+		if (!missingHeaders.empty() && missingHeaders.back() == ' ') missingHeaders.pop_back();
+		info.SetValue(String("vorbisMissingHeaders"), Value(String(missingHeaders.c_str())));
+
+		const char* status = "ready";
+#ifdef PLATFORM_WEB
+		status = "web-backend";
+#else
+		if (state->webPlayer) {
+			status = "web-backend";
+		} else if (!supported) {
+			status = "unsupported-codec";
+		} else if (!ready) {
+			status = "not-ready";
+		} else if (remaining <= 0) {
+			status = "end-of-stream";
+		}
+#endif
+		info.SetValue(String("status"), Value(String(status)));
+		return IntrinsicResult(Value(info));
+	};
+	raylibModule.SetValue("GetVideoAudioDecodeState", i->GetFunc());
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");

@@ -35,6 +35,7 @@ end if
 
 step = rl.StepVideoAudioDecodeScaffold(video, 4)
 decodeStub = null
+decodeState = null
 if step == null then
 	print "Audio diag/scaffold smoke failed: scaffold result is null"
 	rl.UnloadVideoStream video
@@ -119,6 +120,33 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+
+	decodeState = rl.GetVideoAudioDecodeState(video)
+	if decodeState == null then
+		print "Audio diag/scaffold smoke failed: decode state result is null"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if decodeState.status == null or decodeState.totalReadPackets == null or decodeState.remainingPackets == null then
+		print "Audio diag/scaffold smoke failed: decode state missing structured fields"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if decodeState.readyForDecode != 1 then
+		print "Audio diag/scaffold smoke failed: decode state expected readyForDecode=1"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if decodeState.totalReadPackets != decodeStub.totalReadPackets then
+		print "Audio diag/scaffold smoke failed: decode state/read packet counter mismatch"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if decodeState.status != "ready" and decodeState.status != "end-of-stream" then
+		print "Audio diag/scaffold smoke failed: decode state unexpected status=" + decodeState.status
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
@@ -127,6 +155,9 @@ print "audio headers: attempted=" + str(step.vorbisHeaderParseAttempted) + " rea
 print "audio readiness: source=" + step.vorbisHeaderSource + " missing=" + step.vorbisMissingHeaders + " readyForDecode=" + str(step.readyForDecode)
 if decodeStub != null then
 	print "audio decode stub: status=" + decodeStub.status + " consumed=" + str(decodeStub.consumedPacket) + " packetIndex=" + str(decodeStub.packetIndex) + " packetBytes=" + str(decodeStub.packetBytes)
+end if
+if decodeState != null then
+	print "audio decode state: status=" + decodeState.status + " totalReadPackets=" + str(decodeState.totalReadPackets) + " remaining=" + str(decodeState.remainingPackets) + " readyForDecode=" + str(decodeState.readyForDecode)
 end if
 
 rl.UnloadVideoStream video
