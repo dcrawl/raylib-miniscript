@@ -62,11 +62,18 @@ struct VideoPlayerState {
 	bool vorbisSetupSeen = false;
 	bool vorbisHeadersFromCodecPrivate = false;
 	bool vorbisHeadersFromPacketStream = false;
+	bool vorbisSeedHeaderParseAttempted = false;
+	bool vorbisSeedIdentificationSeen = false;
+	bool vorbisSeedCommentSeen = false;
+	bool vorbisSeedSetupSeen = false;
+	bool vorbisSeedHeadersFromCodecPrivate = false;
 	int webHandle = 0;
 	int width = 0;
 	int height = 0;
 	int audioChannels = 0;
 	int vorbisParsedChannels = 0;
+	int vorbisSeedParsedChannels = 0;
+	uint32_t audioDecodeSessionId = 0;
 	uint32_t audioPacketsRead = 0;
 	uint64_t audioBytesRead = 0;
 	uint32_t audioPacketCount = 0;
@@ -75,6 +82,7 @@ struct VideoPlayerState {
 	double audioLastReadPacketTime = 0.0;
 	double audioSampleRate = 0.0;
 	double vorbisParsedSampleRate = 0.0;
+	double vorbisSeedParsedSampleRate = 0.0;
 	uint32_t frameCount = 0;
 	double frameRate = 0.0;
 	double timeLength = 0.0;
@@ -997,6 +1005,7 @@ static bool DecodeFrameAtIndex(VideoPlayerState* state, size_t idx) {
 
 static void InitializeDesktopAudioDecodeScaffold(VideoPlayerState* state) {
 	if (!state) return;
+	if (state->audioDecodeSessionId == 0) state->audioDecodeSessionId = 1;
 	state->audioDecodeScaffoldReady = false;
 	state->audioDecodePath.clear();
 	state->vorbisHeaderParseAttempted = false;
@@ -1089,6 +1098,35 @@ static bool IsAudioDecodeReady(const VideoPlayerState* state) {
 		return state->vorbisIdentificationSeen && state->vorbisCommentSeen && state->vorbisSetupSeen;
 	}
 	return false;
+}
+
+static void ResetAudioDecodeSessionState(VideoPlayerState* state, bool keepSeededHeaders, bool advanceSessionId = true) {
+	if (!state) return;
+	if (advanceSessionId) {
+		state->audioDecodeSessionId += 1;
+	}
+	state->audioPacketsRead = 0;
+	state->audioBytesRead = 0;
+	state->audioLastReadPacketTime = 0.0;
+	state->nextAudioPacketIndex = 0;
+	state->vorbisHeaderParseAttempted = false;
+	state->vorbisIdentificationSeen = false;
+	state->vorbisCommentSeen = false;
+	state->vorbisSetupSeen = false;
+	state->vorbisHeadersFromCodecPrivate = false;
+	state->vorbisHeadersFromPacketStream = false;
+	state->vorbisParsedChannels = 0;
+	state->vorbisParsedSampleRate = 0.0;
+
+	if (keepSeededHeaders && state->audioCodecName == "A_VORBIS") {
+		state->vorbisHeaderParseAttempted = state->vorbisSeedHeaderParseAttempted;
+		state->vorbisIdentificationSeen = state->vorbisSeedIdentificationSeen;
+		state->vorbisCommentSeen = state->vorbisSeedCommentSeen;
+		state->vorbisSetupSeen = state->vorbisSeedSetupSeen;
+		state->vorbisHeadersFromCodecPrivate = state->vorbisSeedHeadersFromCodecPrivate;
+		if (state->vorbisSeedParsedChannels > 0) state->vorbisParsedChannels = state->vorbisSeedParsedChannels;
+		if (state->vorbisSeedParsedSampleRate > 0.0) state->vorbisParsedSampleRate = state->vorbisSeedParsedSampleRate;
+	}
 }
 
 static bool DecodeDesktopAudioPacketStub(VideoPlayerState* state, uint32_t* outPacketIndex, double* outPacketPts, size_t* outPacketBytes) {
@@ -1206,13 +1244,14 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	state->lastError.clear();
 	InitializeDesktopAudioDecodeScaffold(state);
 	if (state->audioCodecName == "A_VORBIS") {
-		state->vorbisHeaderParseAttempted = webmVorbisHeaderParseAttempted;
-		state->vorbisIdentificationSeen = webmVorbisIdentificationSeen;
-		state->vorbisCommentSeen = webmVorbisCommentSeen;
-		state->vorbisSetupSeen = webmVorbisSetupSeen;
-		state->vorbisHeadersFromCodecPrivate = webmVorbisHeadersFromCodecPrivate;
-		if (webmVorbisParsedChannels > 0) state->vorbisParsedChannels = webmVorbisParsedChannels;
-		if (webmVorbisParsedSampleRate > 0.0) state->vorbisParsedSampleRate = webmVorbisParsedSampleRate;
+		state->vorbisSeedHeaderParseAttempted = webmVorbisHeaderParseAttempted;
+		state->vorbisSeedIdentificationSeen = webmVorbisIdentificationSeen;
+		state->vorbisSeedCommentSeen = webmVorbisCommentSeen;
+		state->vorbisSeedSetupSeen = webmVorbisSetupSeen;
+		state->vorbisSeedHeadersFromCodecPrivate = webmVorbisHeadersFromCodecPrivate;
+		state->vorbisSeedParsedChannels = webmVorbisParsedChannels;
+		state->vorbisSeedParsedSampleRate = webmVorbisParsedSampleRate;
+		ResetAudioDecodeSessionState(state, true, false);
 		if (state->audioChannels <= 0 && state->vorbisParsedChannels > 0) state->audioChannels = state->vorbisParsedChannels;
 		if (state->audioSampleRate <= 0.0 && state->vorbisParsedSampleRate > 0.0) state->audioSampleRate = state->vorbisParsedSampleRate;
 	}
@@ -1773,6 +1812,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("decodedSamples"), Value::zero);
 		info.SetValue(String("decodedChannels"), Value(state->audioChannels));
 		info.SetValue(String("decodedSampleRate"), Value(state->audioSampleRate));
+		info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
 		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
 		info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
@@ -1852,6 +1892,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("decodedSamples"), Value::zero);
 			info.SetValue(String("decodedChannels"), Value(s->audioChannels));
 			info.SetValue(String("decodedSampleRate"), Value(s->audioSampleRate));
+			info.SetValue(String("decodeSessionId"), Value((int)s->audioDecodeSessionId));
 			info.SetValue(String("totalReadPackets"), Value((int)s->audioPacketsRead));
 			info.SetValue(String("totalReadBytes"), Value((double)s->audioBytesRead));
 			info.SetValue(String("remainingPackets"), Value((int)(s->audioPackets.size() - s->nextAudioPacketIndex)));
@@ -1938,6 +1979,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (remaining < 0) remaining = 0;
 		info.SetValue(String("supported"), Value(supported));
 		info.SetValue(String("readyForDecode"), Value(ready));
+		info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
 		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
 		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
@@ -1983,6 +2025,78 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		return IntrinsicResult(Value(info));
 	};
 	raylibModule.SetValue("GetVideoAudioDecodeState", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
+	i->AddParam("keepSeededHeaders", Value(1));
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+		int keepSeededHeaders = context->GetVar(String("keepSeededHeaders")).IntValue();
+
+#ifndef PLATFORM_WEB
+		if (!state->webPlayer) {
+			ResetAudioDecodeSessionState(state, keepSeededHeaders != 0, true);
+		}
+#endif
+
+		ValueDict info;
+		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
+		info.SetValue(String("decodePath"), Value(String(state->audioDecodePath.c_str())));
+		int supported = state->audioDecodeScaffoldReady ? 1 : 0;
+		int ready = IsAudioDecodeReady(state) ? 1 : 0;
+		int remaining = (int)(state->audioPackets.size() - state->nextAudioPacketIndex);
+		if (remaining < 0) remaining = 0;
+		info.SetValue(String("supported"), Value(supported));
+		info.SetValue(String("readyForDecode"), Value(ready));
+		info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
+		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
+		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
+		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("remainingPackets"), Value(remaining));
+		info.SetValue(String("lastReadPacketTime"), Value(state->audioLastReadPacketTime));
+		info.SetValue(String("vorbisHeaderParseAttempted"), Value(state->vorbisHeaderParseAttempted ? 1 : 0));
+		info.SetValue(String("vorbisIdentificationSeen"), Value(state->vorbisIdentificationSeen ? 1 : 0));
+		info.SetValue(String("vorbisCommentSeen"), Value(state->vorbisCommentSeen ? 1 : 0));
+		info.SetValue(String("vorbisSetupSeen"), Value(state->vorbisSetupSeen ? 1 : 0));
+		bool vorbisHeadersReady = (state->vorbisIdentificationSeen && state->vorbisCommentSeen && state->vorbisSetupSeen);
+		info.SetValue(String("vorbisHeadersReady"), Value(vorbisHeadersReady ? 1 : 0));
+		const char* headerSource = "none";
+		if (state->vorbisHeadersFromCodecPrivate && state->vorbisHeadersFromPacketStream) {
+			headerSource = "codecPrivate+packet";
+		} else if (state->vorbisHeadersFromCodecPrivate) {
+			headerSource = "codecPrivate";
+		} else if (state->vorbisHeadersFromPacketStream) {
+			headerSource = "packet";
+		}
+		info.SetValue(String("vorbisHeaderSource"), Value(String(headerSource)));
+		std::string missingHeaders;
+		if (!state->vorbisIdentificationSeen) missingHeaders += "identification ";
+		if (!state->vorbisCommentSeen) missingHeaders += "comment ";
+		if (!state->vorbisSetupSeen) missingHeaders += "setup ";
+		if (!missingHeaders.empty() && missingHeaders.back() == ' ') missingHeaders.pop_back();
+		info.SetValue(String("vorbisMissingHeaders"), Value(String(missingHeaders.c_str())));
+
+		const char* status = "ready";
+#ifdef PLATFORM_WEB
+		status = "web-backend";
+#else
+		if (state->webPlayer) {
+			status = "web-backend";
+		} else if (!supported) {
+			status = "unsupported-codec";
+		} else if (!ready) {
+			status = "not-ready";
+		} else if (remaining <= 0) {
+			status = "end-of-stream";
+		}
+#endif
+		info.SetValue(String("status"), Value(String(status)));
+		info.SetValue(String("resetApplied"), Value(1));
+		info.SetValue(String("keptSeededHeaders"), Value(keepSeededHeaders != 0 ? 1 : 0));
+		return IntrinsicResult(Value(info));
+	};
+	raylibModule.SetValue("ResetVideoAudioDecodeSession", i->GetFunc());
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");

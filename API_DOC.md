@@ -826,9 +826,10 @@
 |GetVideoLastError |**video**=null |Get last diagnostic error string (per-player decode/runtime error when video is provided; otherwise returns last load error) |
 |GetVideoAudioIndexDiagnostics |**video** |Get audio packet index diagnostics map: hasAudio, packetCount, firstPacketTime, lastPacketTime, packetSpan, minDelta, maxDelta, avgDelta, nonMonotonicCount, isMonotonic |
 |StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map (`supported`, `readCount`, `totalReadPackets`, `totalReadBytes`, Vorbis header readiness, and decode-gating summary like `readyForDecode`, `vorbisHeaderSource`, `vorbisMissingHeaders`) |
-|DecodeVideoAudioPacket |**video** |Desktop no-playback decode-call stub: consumes one ready audio packet and returns structured status/result map (`status`, `message`, `consumedPacket`, `packetIndex`, `packetPts`, `packetBytes`, `readyForDecode`) |
+|DecodeVideoAudioPacket |**video** |Desktop no-playback decode-call stub: consumes one ready audio packet and returns structured status/result map (`status`, `message`, `decodeSessionId`, `consumedPacket`, `packetIndex`, `packetPts`, `packetBytes`, `readyForDecode`) |
 |DecodeVideoAudioPacketBatch |**video**, **maxPackets**=4 |Desktop no-playback batch decode-call stub: returns a list of per-item result maps using the same schema as `DecodeVideoAudioPacket`, consuming up to maxPackets ready packets |
-|GetVideoAudioDecodeState |**video** |Get current audio decode-session state map (`status`, `supported`, `readyForDecode`, `nextPacketIndex`, `totalReadPackets`, `totalReadBytes`, `remainingPackets`, plus Vorbis header/source diagnostics) |
+|GetVideoAudioDecodeState |**video** |Get current audio decode-session state map (`status`, `supported`, `readyForDecode`, `decodeSessionId`, `nextPacketIndex`, `totalReadPackets`, `totalReadBytes`, `remainingPackets`, plus Vorbis header/source diagnostics) |
+|ResetVideoAudioDecodeSession |**video**, **keepSeededHeaders**=1 |Reset decode-session counters/index to start of audio packet stream and return updated decode-state map; when keepSeededHeaders=1, preserves seeded Vorbis readiness from `CodecPrivate` |
 |SetVideoLooping |**video**, **enabled**=1 |Enable/disable video looping |
 |GetVideoLooping |**video** |Get current looping mode (1/0) |
 |SetVideoPlaybackRate |**video**, **rate**=1.0 |Set playback rate (clamped 0.05..4.0) |
@@ -845,6 +846,8 @@ Notes:
 - `DecodeVideoAudioPacket` is currently a stable stub contract for future decoder integration: when ready, it consumes exactly one packet and returns `status="decode-not-wired"` until real decode internals are connected.
 - `DecodeVideoAudioPacketBatch` preserves the same per-item schema as `DecodeVideoAudioPacket`, so future real decode internals can scale from single to batched execution without script API redesign.
 - `GetVideoAudioDecodeState` is the stable session/progress query API for scripting against decode lifecycle states (`ready`, `not-ready`, `unsupported-codec`, `end-of-stream`, `web-backend`) without depending on internal decoder implementation details.
+- `decodeSessionId` is a monotonically increasing decode-session marker: `ResetVideoAudioDecodeSession` advances it so scripts can detect resets/restarts directly.
+- `ResetVideoAudioDecodeSession` provides deterministic replay of audio decode scaffolding by clearing consumed counters/index and optionally retaining seeded Vorbis readiness (`keepSeededHeaders=1` by default).
 
 MiniScript helper example (standard load + diagnostics):
 

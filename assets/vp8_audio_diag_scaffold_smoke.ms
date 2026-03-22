@@ -37,6 +37,7 @@ step = rl.StepVideoAudioDecodeScaffold(video, 4)
 decodeStub = null
 decodeState = null
 decodeBatch = null
+resetState = null
 if step == null then
 	print "Audio diag/scaffold smoke failed: scaffold result is null"
 	rl.UnloadVideoStream video
@@ -101,6 +102,11 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+	if decodeStub.decodeSessionId == null then
+		print "Audio diag/scaffold smoke failed: decode stub missing decodeSessionId"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 	if decodeStub.readyForDecode != 1 then
 		print "Audio diag/scaffold smoke failed: decode stub expected readyForDecode=1"
 		rl.UnloadVideoStream video
@@ -133,8 +139,18 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+	if decodeState.decodeSessionId == null then
+		print "Audio diag/scaffold smoke failed: decode state missing decodeSessionId"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 	if decodeState.readyForDecode != 1 then
 		print "Audio diag/scaffold smoke failed: decode state expected readyForDecode=1"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if decodeState.decodeSessionId != decodeStub.decodeSessionId then
+		print "Audio diag/scaffold smoke failed: decode state/session id mismatch"
 		rl.UnloadVideoStream video
 		exit 1
 	end if
@@ -171,6 +187,16 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+	if firstItem.decodeSessionId == null then
+		print "Audio diag/scaffold smoke failed: decode batch item missing decodeSessionId"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if firstItem.decodeSessionId != decodeStub.decodeSessionId then
+		print "Audio diag/scaffold smoke failed: decode batch/session id mismatch"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 	if firstItem.status != "decode-not-wired" then
 		print "Audio diag/scaffold smoke failed: decode batch first item expected decode-not-wired"
 		rl.UnloadVideoStream video
@@ -186,6 +212,33 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+
+	resetState = rl.ResetVideoAudioDecodeSession(video)
+	if resetState == null then
+		print "Audio diag/scaffold smoke failed: reset decode session result is null"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if resetState.totalReadPackets != 0 or resetState.nextPacketIndex != 0 then
+		print "Audio diag/scaffold smoke failed: reset did not clear decode counters"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if resetState.decodeSessionId == null then
+		print "Audio diag/scaffold smoke failed: reset state missing decodeSessionId"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if resetState.decodeSessionId <= decodeStub.decodeSessionId then
+		print "Audio diag/scaffold smoke failed: reset did not advance decodeSessionId"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if resetState.readyForDecode != 1 then
+		print "Audio diag/scaffold smoke failed: reset expected readyForDecode=1 when keeping seeded headers"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
@@ -193,13 +246,16 @@ print "audio scaffold: supported=" + str(step.supported) + " readCount=" + str(s
 print "audio headers: attempted=" + str(step.vorbisHeaderParseAttempted) + " ready=" + str(step.vorbisHeadersReady) + " id=" + str(step.vorbisIdentificationSeen) + " comment=" + str(step.vorbisCommentSeen) + " setup=" + str(step.vorbisSetupSeen)
 print "audio readiness: source=" + step.vorbisHeaderSource + " missing=" + step.vorbisMissingHeaders + " readyForDecode=" + str(step.readyForDecode)
 if decodeStub != null then
-	print "audio decode stub: status=" + decodeStub.status + " consumed=" + str(decodeStub.consumedPacket) + " packetIndex=" + str(decodeStub.packetIndex) + " packetBytes=" + str(decodeStub.packetBytes)
+	print "audio decode stub: sessionId=" + str(decodeStub.decodeSessionId) + " status=" + decodeStub.status + " consumed=" + str(decodeStub.consumedPacket) + " packetIndex=" + str(decodeStub.packetIndex) + " packetBytes=" + str(decodeStub.packetBytes)
 end if
 if decodeState != null then
-	print "audio decode state: status=" + decodeState.status + " totalReadPackets=" + str(decodeState.totalReadPackets) + " remaining=" + str(decodeState.remainingPackets) + " readyForDecode=" + str(decodeState.readyForDecode)
+	print "audio decode state: sessionId=" + str(decodeState.decodeSessionId) + " status=" + decodeState.status + " totalReadPackets=" + str(decodeState.totalReadPackets) + " remaining=" + str(decodeState.remainingPackets) + " readyForDecode=" + str(decodeState.readyForDecode)
 end if
 if decodeBatch != null then
-	print "audio decode batch: count=" + str(len(decodeBatch)) + " firstStatus=" + decodeBatch[0].status + " firstConsumed=" + str(decodeBatch[0].consumedPacket)
+	print "audio decode batch: count=" + str(len(decodeBatch)) + " firstSessionId=" + str(decodeBatch[0].decodeSessionId) + " firstStatus=" + decodeBatch[0].status + " firstConsumed=" + str(decodeBatch[0].consumedPacket)
+end if
+if resetState != null then
+	print "audio decode reset: sessionId=" + str(resetState.decodeSessionId) + " status=" + resetState.status + " totalReadPackets=" + str(resetState.totalReadPackets) + " nextPacketIndex=" + str(resetState.nextPacketIndex) + " readyForDecode=" + str(resetState.readyForDecode)
 end if
 
 rl.UnloadVideoStream video
