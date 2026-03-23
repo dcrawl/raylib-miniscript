@@ -825,11 +825,12 @@
 |GetVideoBackend |**video** |Get active backend name as string: `desktop` or `web` |
 |GetVideoLastError |**video**=null |Get last diagnostic error string (per-player decode/runtime error when video is provided; otherwise returns last load error) |
 |GetVideoAudioIndexDiagnostics |**video** |Get audio packet index diagnostics map: hasAudio, packetCount, firstPacketTime, lastPacketTime, packetSpan, minDelta, maxDelta, avgDelta, nonMonotonicCount, isMonotonic |
-|StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1, **expectedSessionId**=0 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map (`supported`, `readCount`, `totalReadPackets`, `totalReadBytes`, Vorbis header readiness, and decode-gating summary like `readyForDecode`, `vorbisHeaderSource`, `vorbisMissingHeaders`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` with `readCount=0` |
+|StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1, **expectedSessionId**=0 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map (`status`, `message`, `decodeSessionId`, `supported`, `readCount`, `totalReadPackets`, `totalReadBytes`, Vorbis header readiness, and decode-gating summary like `readyForDecode`, `vorbisHeaderSource`, `vorbisMissingHeaders`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` with `readCount=0` |
 |DecodeVideoAudioPacket |**video**, **expectedSessionId**=0 |Desktop no-playback decode-call stub: consumes one ready audio packet and returns structured status/result map (`status`, `message`, `decodeSessionId`, `consumedPacket`, `packetIndex`, `packetPts`, `packetBytes`, `readyForDecode`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` without consuming |
 |DecodeVideoAudioPacketBatch |**video**, **maxPackets**=4, **expectedSessionId**=0 |Desktop no-playback batch decode-call stub: returns a list of per-item result maps using the same schema as `DecodeVideoAudioPacket`, consuming up to maxPackets ready packets; when expectedSessionId > 0 and stale, returns one `session-mismatch` item without consuming |
-|GetVideoAudioDecodeState |**video** |Get current audio decode-session state map (`status`, `supported`, `readyForDecode`, `decodeSessionId`, `nextPacketIndex`, `totalReadPackets`, `totalReadBytes`, `remainingPackets`, plus Vorbis header/source diagnostics) |
-|ResetVideoAudioDecodeSession |**video**, **keepSeededHeaders**=1 |Reset decode-session counters/index to start of audio packet stream and return updated decode-state map; when keepSeededHeaders=1, preserves seeded Vorbis readiness from `CodecPrivate` |
+|GetVideoAudioDecodeState |**video** |Get current audio decode-session state map (`status`, `message`, `supported`, `readyForDecode`, `decodeSessionId`, `nextPacketIndex`, `totalReadPackets`, `totalReadBytes`, `remainingPackets`, plus Vorbis header/source diagnostics) |
+|CreateVideoAudioDecodeSession |**video** |Create a lightweight decode-session snapshot for session-safe scripting: returns `decodeSessionId` plus readiness/status fields (`status`, `message`, `supported`, `readyForDecode`, `nextPacketIndex`, `remainingPackets`) without consuming packets |
+|ResetVideoAudioDecodeSession |**video**, **keepSeededHeaders**=1 |Reset decode-session counters/index to start of audio packet stream and return updated decode-state map (`status`, `message`, decode counters/readiness fields); when keepSeededHeaders=1, preserves seeded Vorbis readiness from `CodecPrivate` |
 |SetVideoLooping |**video**, **enabled**=1 |Enable/disable video looping |
 |GetVideoLooping |**video** |Get current looping mode (1/0) |
 |SetVideoPlaybackRate |**video**, **rate**=1.0 |Set playback rate (clamped 0.05..4.0) |
@@ -844,10 +845,14 @@ Notes:
 - Desktop decodes VP8 from IVF and WebM containers; unsupported/invalid WebM block layouts are reported through runtime warnings.
 - `StepVideoAudioDecodeScaffold` is intentionally a scaffolding API: it only reads encoded audio packets (no audio playback/sync yet) and reports Vorbis header readiness (`vorbisHeaderParseAttempted`, `vorbisIdentificationSeen`, `vorbisCommentSeen`, `vorbisSetupSeen`, `vorbisHeadersReady`) sourced from packet scans and Matroska `CodecPrivate` parsing, plus decode gating (`readyForDecode`) and source/missing-header diagnostics (`vorbisHeaderSource`, `vorbisMissingHeaders`).
 - `StepVideoAudioDecodeScaffold` accepts an optional `expectedSessionId` guard; if it does not match current `decodeSessionId`, it returns `session-mismatch` and does not read packets.
+- `StepVideoAudioDecodeScaffold` now always includes `status`/`message` for consistent decode-path handling (`ok`, `end-of-stream`, `unsupported-codec`, `read-failed`, `session-mismatch`).
 - `DecodeVideoAudioPacket` is currently a stable stub contract for future decoder integration: when ready, it consumes exactly one packet and returns `status="decode-not-wired"` until real decode internals are connected.
 - `DecodeVideoAudioPacketBatch` preserves the same per-item schema as `DecodeVideoAudioPacket`, so future real decode internals can scale from single to batched execution without script API redesign.
 - `DecodeVideoAudioPacket` and `DecodeVideoAudioPacketBatch` accept an optional `expectedSessionId` guard; if it does not match current `decodeSessionId`, they return `session-mismatch` and do not consume packets.
 - `GetVideoAudioDecodeState` is the stable session/progress query API for scripting against decode lifecycle states (`ready`, `not-ready`, `unsupported-codec`, `end-of-stream`, `web-backend`) without depending on internal decoder implementation details.
+- `GetVideoAudioDecodeState` and `ResetVideoAudioDecodeSession` now include a `message` field so scripts can log human-readable state transitions without custom mapping tables.
+- `CreateVideoAudioDecodeSession` is a tiny one-call session bootstrap API for scripts: read `decodeSessionId` and initial readiness/status before issuing guarded decode-path calls.
+- Recommended session-safe flow: call `CreateVideoAudioDecodeSession` once, then pass `session.decodeSessionId` into `StepVideoAudioDecodeScaffold`, `DecodeVideoAudioPacket`, and `DecodeVideoAudioPacketBatch` as `expectedSessionId`.
 - `decodeSessionId` is a monotonically increasing decode-session marker: `ResetVideoAudioDecodeSession` advances it so scripts can detect resets/restarts directly.
 - `ResetVideoAudioDecodeSession` provides deterministic replay of audio decode scaffolding by clearing consumed counters/index and optionally retaining seeded Vorbis readiness (`keepSeededHeaders=1` by default).
 
@@ -865,4 +870,117 @@ end function
 
 video = loadVideoOrFail("assets/EmberfallMovie.webm")
 if video == null then exit 1
+```
+
+MiniScript helper example (guarded decode loop):
+
+```miniscript
+video = raylib.LoadVideoStream("assets/EmberfallMovie.webm")
+if video == null then
+	print "video load failed: " + raylib.GetVideoLastError()
+	exit 1
+end if
+
+session = raylib.CreateVideoAudioDecodeSession(video)
+if session == null then
+	print "decode session create failed"
+	raylib.UnloadVideoStream video
+	exit 1
+end if
+
+while true
+	# Guarded scaffold read: stale callers get status=session-mismatch with readCount=0.
+	step = raylib.StepVideoAudioDecodeScaffold(video, 4, session.decodeSessionId)
+	if step == null then
+		print "scaffold step failed"
+		break
+	end if
+	if step.status == "session-mismatch" then
+		print "session stale during step; restarting session"
+		session = raylib.CreateVideoAudioDecodeSession(video)
+		continue
+	end if
+	if step.status == "unsupported-codec" or step.status == "read-failed" then
+		print "step error: " + step.status + " msg=" + step.message
+		break
+	end if
+
+	decode = raylib.DecodeVideoAudioPacket(video, session.decodeSessionId)
+	if decode == null then
+		print "decode call failed"
+		break
+	end if
+	if decode.status == "session-mismatch" then
+		print "session stale during decode; restarting session"
+		session = raylib.CreateVideoAudioDecodeSession(video)
+		continue
+	end if
+	if decode.status == "end-of-stream" then
+		print "audio decode reached end of stream"
+		break
+	end if
+
+	# Today this returns decode-not-wired after consuming one packet.
+	if decode.status == "decode-not-wired" then
+		print "consumed packet=" + str(decode.packetIndex)
+	end if
+end while
+
+raylib.UnloadVideoStream video
+```
+
+MiniScript helper example (guarded batch decode loop):
+
+```miniscript
+video = raylib.LoadVideoStream("assets/EmberfallMovie.webm")
+if video == null then
+	print "video load failed: " + raylib.GetVideoLastError()
+	exit 1
+end if
+
+session = raylib.CreateVideoAudioDecodeSession(video)
+if session == null then
+	print "decode session create failed"
+	raylib.UnloadVideoStream video
+	exit 1
+end if
+
+while true
+	step = raylib.StepVideoAudioDecodeScaffold(video, 8, session.decodeSessionId)
+	if step == null then
+		print "scaffold step failed"
+		break
+	end if
+	if step.status == "session-mismatch" then
+		session = raylib.CreateVideoAudioDecodeSession(video)
+		continue
+	end if
+	if step.status == "unsupported-codec" or step.status == "read-failed" then
+		print "step error: " + step.status + " msg=" + step.message
+		break
+	end if
+
+	batch = raylib.DecodeVideoAudioPacketBatch(video, 4, session.decodeSessionId)
+	if batch == null or len(batch) < 1 then
+		print "batch decode failed"
+		break
+	end if
+
+	first = batch[0]
+	if first.status == "session-mismatch" then
+		session = raylib.CreateVideoAudioDecodeSession(video)
+		continue
+	end if
+	if first.status == "end-of-stream" then
+		print "audio decode reached end of stream"
+		break
+	end if
+
+	# Today items return decode-not-wired after packet consumption.
+	if first.status == "decode-not-wired" then
+		print "batch consumed=" + str(len(batch)) + " firstPacket=" + str(first.packetIndex)
+	end if
+end while
+
+raylib.UnloadVideoStream video
 ```

@@ -1829,6 +1829,20 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		int readyForDecode = 0;
 		if (state->audioDecodeScaffoldReady && state->audioCodecName == "A_VORBIS" && vorbisHeadersReady) readyForDecode = 1;
 		info.SetValue(String("readyForDecode"), Value(readyForDecode));
+		const char* status = "ok";
+		const char* message = "audio scaffold step completed";
+		if (!state->audioDecodeScaffoldReady) {
+			status = "unsupported-codec";
+			message = "audio decode path is not scaffolded for this codec";
+		} else if (state->nextAudioPacketIndex >= state->audioPackets.size()) {
+			status = "end-of-stream";
+			message = "no more audio packets to read";
+		} else if (readCount == 0 && !state->lastError.empty()) {
+			status = "read-failed";
+			message = "failed to read audio packet from stream";
+		}
+		info.SetValue(String("status"), Value(String(status)));
+		info.SetValue(String("message"), Value(String(message)));
 		return IntrinsicResult(Value(info));
 #endif
 	};
@@ -2065,23 +2079,75 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("vorbisMissingHeaders"), Value(String(missingHeaders.c_str())));
 
 		const char* status = "ready";
+		const char* message = "decode state snapshot";
 #ifdef PLATFORM_WEB
 		status = "web-backend";
+		message = "audio decode state is desktop-only";
 #else
 		if (state->webPlayer) {
 			status = "web-backend";
+			message = "audio decode state is desktop-only";
 		} else if (!supported) {
 			status = "unsupported-codec";
+			message = "audio decode path is not scaffolded for this codec";
 		} else if (!ready) {
 			status = "not-ready";
+			message = "audio headers are incomplete; decoder not ready";
 		} else if (remaining <= 0) {
 			status = "end-of-stream";
+			message = "no more audio packets to consume";
 		}
 #endif
 		info.SetValue(String("status"), Value(String(status)));
+		info.SetValue(String("message"), Value(String(message)));
 		return IntrinsicResult(Value(info));
 	};
 	raylibModule.SetValue("GetVideoAudioDecodeState", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+
+		ValueDict info;
+		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
+		info.SetValue(String("decodePath"), Value(String(state->audioDecodePath.c_str())));
+		int supported = state->audioDecodeScaffoldReady ? 1 : 0;
+		int ready = IsAudioDecodeReady(state) ? 1 : 0;
+		int remaining = (int)(state->audioPackets.size() - state->nextAudioPacketIndex);
+		if (remaining < 0) remaining = 0;
+		info.SetValue(String("supported"), Value(supported));
+		info.SetValue(String("readyForDecode"), Value(ready));
+		info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
+		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
+		info.SetValue(String("remainingPackets"), Value(remaining));
+
+		const char* status = "ready";
+		const char* message = "decode session snapshot created";
+#ifdef PLATFORM_WEB
+		status = "web-backend";
+		message = "audio decode helper is desktop-only";
+#else
+		if (state->webPlayer) {
+			status = "web-backend";
+			message = "audio decode helper is desktop-only";
+		} else if (!supported) {
+			status = "unsupported-codec";
+			message = "audio decode path is not scaffolded for this codec";
+		} else if (!ready) {
+			status = "not-ready";
+			message = "audio headers are incomplete; decoder not ready";
+		} else if (remaining <= 0) {
+			status = "end-of-stream";
+			message = "no more audio packets to consume";
+		}
+#endif
+		info.SetValue(String("status"), Value(String(status)));
+		info.SetValue(String("message"), Value(String(message)));
+		return IntrinsicResult(Value(info));
+	};
+	raylibModule.SetValue("CreateVideoAudioDecodeSession", i->GetFunc());
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");
@@ -2135,20 +2201,27 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("vorbisMissingHeaders"), Value(String(missingHeaders.c_str())));
 
 		const char* status = "ready";
+		const char* message = "decode session reset applied";
 #ifdef PLATFORM_WEB
 		status = "web-backend";
+		message = "audio decode reset is desktop-only";
 #else
 		if (state->webPlayer) {
 			status = "web-backend";
+			message = "audio decode reset is desktop-only";
 		} else if (!supported) {
 			status = "unsupported-codec";
+			message = "audio decode path is not scaffolded for this codec";
 		} else if (!ready) {
 			status = "not-ready";
+			message = "audio headers are incomplete; decoder not ready";
 		} else if (remaining <= 0) {
 			status = "end-of-stream";
+			message = "no more audio packets to consume";
 		}
 #endif
 		info.SetValue(String("status"), Value(String(status)));
+		info.SetValue(String("message"), Value(String(message)));
 		info.SetValue(String("resetApplied"), Value(1));
 		info.SetValue(String("keptSeededHeaders"), Value(keepSeededHeaders != 0 ? 1 : 0));
 		return IntrinsicResult(Value(info));
