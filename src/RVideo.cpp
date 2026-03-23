@@ -28,9 +28,17 @@
 #define HAVE_LIBVPX 0
 #endif
 
+#ifndef HAVE_LIBVORBIS
+#define HAVE_LIBVORBIS 0
+#endif
+
 #if HAVE_LIBVPX
 #include <vpx/vpx_decoder.h>
 #include <vpx/vp8dx.h>
+#endif
+
+#if HAVE_LIBVORBIS
+#include <vorbis/codec.h>
 #endif
 
 using namespace MiniScript;
@@ -76,10 +84,23 @@ struct VideoPlayerState {
 	uint32_t audioDecodeSessionId = 0;
 	uint32_t audioPacketsRead = 0;
 	uint64_t audioBytesRead = 0;
+	uint64_t decodedPcmFramesAvailable = 0;
+	uint64_t decodedPcmFramesTotal = 0;
+	uint64_t decodedPcmFramesConsumed = 0;
+	uint64_t decodedPcmFramesClockEstimated = 0;
+	uint64_t decodedPcmFramesClockConsumed = 0;
+	uint32_t vorbisPacketsDecoded = 0;
+	uint32_t autoRefillTriggerCount = 0;
+	uint32_t autoRefillPacketsDecoded = 0;
+	uint32_t autoRefillTargetHitCount = 0;
+	double autoRefillLastLatencyMs = 0.0;
+	double autoRefillTargetLatencyMs = 0.0;
+	double autoRefillLatencyGainMsTotal = 0.0;
 	uint32_t audioPacketCount = 0;
 	double audioFirstPacketTime = 0.0;
 	double audioLastPacketTime = 0.0;
 	double audioLastReadPacketTime = 0.0;
+	double decodedPcmDrainRemainder = 0.0;
 	double audioSampleRate = 0.0;
 	double vorbisParsedSampleRate = 0.0;
 	double vorbisSeedParsedSampleRate = 0.0;
@@ -92,6 +113,21 @@ struct VideoPlayerState {
 	double playBaseClock = 0.0;
 	double playBaseTime = 0.0;
 	double lastObservedTime = 0.0;
+	std::string syncMode = "wall-clock";
+	bool audioLedSyncEnabled = true;
+	bool audioSyncOffsetPrimed = false;
+	double audioSyncClampWindowMs = 120.0;
+	double audioSyncOffsetSec = 0.0;
+	double lastAudioClockSec = 0.0;
+	double lastAudioLedTargetSec = 0.0;
+	double videoAudioSyncSkewMs = 0.0;    // video clock ahead of audio-consumed position (ms); negative = video behind
+	double lastDecodedFramePts = 0.0;    // PTS of most recently VP8-decoded frame
+	double lastUpdateTargetPts = 0.0;    // targetTime computed in last UpdateVideoStream
+	uint32_t totalFramesDecoded = 0;     // cumulative VP8 decode calls (never resets on rewind)
+	uint32_t totalFramesSkipped = 0;     // stale frames advanced past without decoding (catch-up)
+	uint32_t totalFrameDropEvents = 0;   // times decode budget was exhausted with pending frames
+	int lastDecodeBudgetUsed = 0;        // frames decoded in the most recent UpdateVideoStream tick
+	bool lastDecodeBudgetExhausted = false; // budget saturated AND frames still pending after last tick
 	bool looping = false;
 	bool loopEventPending = false;
 	bool finishEventPending = false;
@@ -106,6 +142,26 @@ struct VideoPlayerState {
 	std::vector<EncodedFrame> audioPackets;
 	size_t nextFrameIndex = 0;
 	size_t nextAudioPacketIndex = 0;
+#endif
+	// Raw Vorbis header packets extracted from CodecPrivate (always three: id, comment, setup)
+	std::vector<std::vector<unsigned char>> vorbisCodecPrivateHeaders;
+
+#if HAVE_LIBVORBIS
+	vorbis_info      vorbisInfo;
+	vorbis_comment   vorbisComment;
+	vorbis_dsp_state vorbisState;
+	vorbis_block     vorbisBlock;
+	bool vorbisDecoderInited = false;
+	bool vorbisBlockInited = false;
+	// Audio stream for real playback
+	AudioStream audioStream = {0};
+	bool audioStreamInited = false;
+	bool audioStreamPlaying = false;
+	// Interleaved float PCM buffer awaiting feed to AudioStream
+	std::vector<float> pcmPlaybackBuffer;
+	size_t pcmPlaybackHead = 0;
+	uint64_t pcmFramesFedToStream = 0;
+	int audioStreamBufferFrames = 4096;  // frames per UpdateAudioStream call (~93ms at 44100Hz)
 #endif
 };
 
@@ -429,12 +485,14 @@ static bool ParseSimpleBlock(const std::vector<unsigned char>& fileData,
 
 static bool ParseVorbisCodecPrivate(const unsigned char* data, size_t size,
 	bool* outIdentificationSeen, bool* outCommentSeen, bool* outSetupSeen,
-	int* outChannels, double* outSampleRate) {
+	int* outChannels, double* outSampleRate,
+	std::vector<std::vector<unsigned char>>* outHeaders = nullptr) {
 	if (outIdentificationSeen) *outIdentificationSeen = false;
 	if (outCommentSeen) *outCommentSeen = false;
 	if (outSetupSeen) *outSetupSeen = false;
 	if (outChannels) *outChannels = 0;
 	if (outSampleRate) *outSampleRate = 0.0;
+	if (outHeaders) outHeaders->clear();
 
 	if (!data || size < 1) return false;
 
@@ -476,6 +534,13 @@ static bool ParseVorbisCodecPrivate(const unsigned char* data, size_t size,
 		if (outSampleRate) *outSampleRate = (double)ReadLE32(&h1[12]);
 	}
 
+	if (outHeaders) {
+		outHeaders->resize(3);
+		(*outHeaders)[0].assign(h1, h1 + headerSizes[0]);
+		(*outHeaders)[1].assign(h2, h2 + headerSizes[1]);
+		(*outHeaders)[2].assign(h3, h3 + headerSizes[2]);
+	}
+
 	if (outIdentificationSeen) *outIdentificationSeen = idSeen;
 	if (outCommentSeen) *outCommentSeen = commentSeen;
 	if (outSetupSeen) *outSetupSeen = setupSeen;
@@ -488,7 +553,8 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 	bool* outVorbisHeaderParseAttempted, bool* outVorbisIdentificationSeen,
 	bool* outVorbisCommentSeen, bool* outVorbisSetupSeen,
 	int* outVorbisParsedChannels, double* outVorbisParsedSampleRate,
-	bool* outVorbisHeadersFromCodecPrivate) {
+	bool* outVorbisHeadersFromCodecPrivate,
+	std::vector<std::vector<unsigned char>>* outVorbisCodecPrivateHeaders = nullptr) {
 	std::vector<unsigned char> fileData;
 	if (!ReadFileBytes(path, &fileData)) return false;
 
@@ -685,7 +751,8 @@ static bool ParseWebMFrames(const char* path, int* outW, int* outH, double* outF
 							double parsedSampleRate = 0.0;
 							vorbisHeaderParseAttempted = true;
 							if (ParseVorbisCodecPrivate(codecPrivate.data(), codecPrivate.size(),
-								&idSeen, &commentSeen, &setupSeen, &parsedChannels, &parsedSampleRate)) {
+								&idSeen, &commentSeen, &setupSeen, &parsedChannels, &parsedSampleRate,
+								outVorbisCodecPrivateHeaders)) {
 								vorbisIdentificationSeen = vorbisIdentificationSeen || idSeen;
 								vorbisCommentSeen = vorbisCommentSeen || commentSeen;
 								vorbisSetupSeen = vorbisSetupSeen || setupSeen;
@@ -953,6 +1020,26 @@ static bool RewindDesktopVideo(VideoPlayerState* state) {
 	state->playBaseTime = 0.0;
 	state->lastObservedTime = 0.0;
 	state->finishedPrev = false;
+	state->syncMode = "wall-clock";
+	state->audioSyncOffsetPrimed = false;
+	state->audioSyncOffsetSec = 0.0;
+	state->lastAudioClockSec = 0.0;
+	state->lastAudioLedTargetSec = 0.0;
+	// Reset per-tick sync fields (lifetime counters totalFramesDecoded/Skipped/DropEvents are preserved)
+	state->videoAudioSyncSkewMs = 0.0;
+	state->lastDecodedFramePts = 0.0;
+	state->lastUpdateTargetPts = 0.0;
+	state->lastDecodeBudgetUsed = 0;
+	state->lastDecodeBudgetExhausted = false;
+#if HAVE_LIBVORBIS
+	if (state->audioStreamInited && state->audioStreamPlaying) {
+		StopAudioStream(state->audioStream);
+		state->audioStreamPlaying = false;
+	}
+	state->pcmPlaybackBuffer.clear();
+	state->pcmPlaybackHead = 0;
+	state->pcmFramesFedToStream = 0;
+#endif
 	return true;
 }
 
@@ -996,12 +1083,102 @@ static bool DecodeFrameAtIndex(VideoPlayerState* state, size_t idx) {
 	state->currentFrame = (uint32_t)(idx + 1);
 	state->timePlayed = f.pts;
 	state->nextFrameIndex = idx + 1;
+	state->totalFramesDecoded++;
+	state->lastDecodedFramePts = f.pts;
 	if (state->nextFrameIndex >= state->frames.size()) {
 		state->finished = true;
 		state->playing = false;
 	}
 	return true;
 }
+
+#if HAVE_LIBVORBIS
+static void ClearVorbisDecoder(VideoPlayerState* state) {
+	if (!state) return;
+	if (state->vorbisBlockInited) {
+		vorbis_block_clear(&state->vorbisBlock);
+		state->vorbisBlockInited = false;
+	}
+	if (state->vorbisDecoderInited) {
+		vorbis_dsp_clear(&state->vorbisState);
+		vorbis_comment_clear(&state->vorbisComment);
+		vorbis_info_clear(&state->vorbisInfo);
+		state->vorbisDecoderInited = false;
+	}
+}
+
+static bool InitVorbisDecoderFromHeaders(VideoPlayerState* state) {
+	if (!state) return false;
+	if (state->vorbisCodecPrivateHeaders.size() != 3) return false;
+
+	ClearVorbisDecoder(state);
+
+	vorbis_info_init(&state->vorbisInfo);
+	vorbis_comment_init(&state->vorbisComment);
+
+	for (int i = 0; i < 3; i++) {
+		const auto& hdr = state->vorbisCodecPrivateHeaders[i];
+		ogg_packet op;
+		memset(&op, 0, sizeof(op));
+		op.packet    = (unsigned char*)hdr.data();
+		op.bytes     = (long)hdr.size();
+		op.b_o_s     = (i == 0) ? 1 : 0;
+		op.e_o_s     = 0;
+		op.granulepos = 0;
+		op.packetno  = (ogg_int64_t)i;
+		int ret = vorbis_synthesis_headerin(&state->vorbisInfo, &state->vorbisComment, &op);
+		if (ret != 0) {
+			TraceLog(LOG_WARNING, "InitVorbisDecoderFromHeaders: header packet %d rejected (err=%d)", i, ret);
+			vorbis_comment_clear(&state->vorbisComment);
+			vorbis_info_clear(&state->vorbisInfo);
+			return false;
+		}
+	}
+
+	if (vorbis_synthesis_init(&state->vorbisState, &state->vorbisInfo) != 0) {
+		TraceLog(LOG_WARNING, "InitVorbisDecoderFromHeaders: vorbis_synthesis_init failed");
+		vorbis_comment_clear(&state->vorbisComment);
+		vorbis_info_clear(&state->vorbisInfo);
+		return false;
+	}
+
+	vorbis_block_init(&state->vorbisState, &state->vorbisBlock);
+	state->vorbisDecoderInited = true;
+	state->vorbisBlockInited = true;
+	return true;
+}
+
+static void FeedAudioStreamFromBuffer(VideoPlayerState* state) {
+#if HAVE_LIBVORBIS
+	if (!state || !state->audioStreamInited || !state->audioStreamPlaying) return;
+	int ch = state->audioChannels > 0 ? state->audioChannels : 1;
+	size_t wantFloats = (size_t)state->audioStreamBufferFrames * (size_t)ch;
+	while (IsAudioStreamProcessed(state->audioStream)) {
+		size_t available = (state->pcmPlaybackHead < state->pcmPlaybackBuffer.size())
+			? state->pcmPlaybackBuffer.size() - state->pcmPlaybackHead : 0;
+		if (available < wantFloats) break;
+		UpdateAudioStream(state->audioStream,
+			state->pcmPlaybackBuffer.data() + state->pcmPlaybackHead,
+			state->audioStreamBufferFrames);
+		state->pcmPlaybackHead += wantFloats;
+		state->pcmFramesFedToStream += (uint64_t)state->audioStreamBufferFrames;
+		state->decodedPcmFramesConsumed += (uint64_t)state->audioStreamBufferFrames;
+		// Compact buffer when head advances past half its size
+		if (state->pcmPlaybackHead >= state->pcmPlaybackBuffer.size() / 2) {
+			state->pcmPlaybackBuffer.erase(
+				state->pcmPlaybackBuffer.begin(),
+				state->pcmPlaybackBuffer.begin() + (ptrdiff_t)state->pcmPlaybackHead);
+			state->pcmPlaybackHead = 0;
+		}
+	}
+	// Keep decodedPcmFramesAvailable in sync with the real PCM buffer
+	size_t avail = (state->pcmPlaybackHead < state->pcmPlaybackBuffer.size())
+		? state->pcmPlaybackBuffer.size() - state->pcmPlaybackHead : 0;
+	state->decodedPcmFramesAvailable = (uint64_t)(avail / (size_t)ch);
+#endif
+}
+
+#endif
 
 static void InitializeDesktopAudioDecodeScaffold(VideoPlayerState* state) {
 	if (!state) return;
@@ -1018,7 +1195,20 @@ static void InitializeDesktopAudioDecodeScaffold(VideoPlayerState* state) {
 	state->vorbisParsedSampleRate = 0.0;
 	state->audioPacketsRead = 0;
 	state->audioBytesRead = 0;
+	state->decodedPcmFramesAvailable = 0;
+	state->decodedPcmFramesTotal = 0;
+	state->decodedPcmFramesConsumed = 0;
+	state->decodedPcmFramesClockEstimated = 0;
+	state->decodedPcmFramesClockConsumed = 0;
+	state->vorbisPacketsDecoded = 0;
+	state->autoRefillTriggerCount = 0;
+	state->autoRefillPacketsDecoded = 0;
+	state->autoRefillTargetHitCount = 0;
+	state->autoRefillLastLatencyMs = 0.0;
+	state->autoRefillTargetLatencyMs = 0.0;
+	state->autoRefillLatencyGainMsTotal = 0.0;
 	state->audioLastReadPacketTime = 0.0;
+	state->decodedPcmDrainRemainder = 0.0;
 #if HAVE_LIBVPX
 	state->nextAudioPacketIndex = 0;
 	if (state->webPlayer) return;
@@ -1070,6 +1260,67 @@ static void UpdateVorbisHeaderScaffold(VideoPlayerState* state, const std::vecto
 	}
 }
 
+static bool IsVorbisHeaderPacket(const std::vector<unsigned char>& packet, uint8_t* outHeaderType = nullptr) {
+	if (outHeaderType) *outHeaderType = 0;
+	if (packet.size() < 7) return false;
+	if (!(packet[1] == 'v' && packet[2] == 'o' && packet[3] == 'r' && packet[4] == 'b' && packet[5] == 'i' && packet[6] == 's')) return false;
+	if (outHeaderType) *outHeaderType = packet[0];
+	return packet[0] == 0x01 || packet[0] == 0x03 || packet[0] == 0x05;
+}
+
+static double GetEffectiveAudioSampleRate(const VideoPlayerState* state) {
+	if (!state) return 0.0;
+	if (state->audioSampleRate > 0.0) return state->audioSampleRate;
+	if (state->vorbisParsedSampleRate > 0.0) return state->vorbisParsedSampleRate;
+	return 0.0;
+}
+
+static int GetEffectiveAudioChannels(const VideoPlayerState* state) {
+	if (!state) return 0;
+	if (state->audioChannels > 0) return state->audioChannels;
+	if (state->vorbisParsedChannels > 0) return state->vorbisParsedChannels;
+	return 0;
+}
+
+static double GetAudioStreamClockSec(const VideoPlayerState* state) {
+	if (!state) return 0.0;
+	double sampleRate = GetEffectiveAudioSampleRate(state);
+	if (sampleRate <= 0.0) return 0.0;
+	if (state->pcmFramesFedToStream == 0) return 0.0;
+	return (double)state->pcmFramesFedToStream / sampleRate;
+}
+
+static void PrimeAudioSyncOffset(VideoPlayerState* state) {
+	if (!state) return;
+	double audioClockSec = GetAudioStreamClockSec(state);
+	state->audioSyncOffsetSec = state->timePlayed - audioClockSec;
+	state->audioSyncOffsetPrimed = true;
+	state->lastAudioClockSec = audioClockSec;
+	state->lastAudioLedTargetSec = audioClockSec + state->audioSyncOffsetSec;
+}
+
+static int EstimateVorbisPacketDecodedSamples(const VideoPlayerState* state, size_t packetIndex) {
+	if (!state) return 0;
+	double sampleRate = GetEffectiveAudioSampleRate(state);
+	if (sampleRate <= 0.0) return 0;
+
+	double delta = 0.0;
+	if (packetIndex + 1 < state->audioPackets.size()) {
+		delta = state->audioPackets[packetIndex + 1].pts - state->audioPackets[packetIndex].pts;
+	} else if (packetIndex > 0 && packetIndex < state->audioPackets.size()) {
+		delta = state->audioPackets[packetIndex].pts - state->audioPackets[packetIndex - 1].pts;
+	}
+
+	if (delta <= 0.0) delta = 0.02;
+	if (delta < 0.001) delta = 0.001;
+	if (delta > 0.2) delta = 0.2;
+
+	int samples = (int)llround(delta * sampleRate);
+	if (samples < 1) samples = 1;
+	if (samples > 16384) samples = 16384;
+	return samples;
+}
+
 static int StepDesktopAudioDecodeScaffold(VideoPlayerState* state, int maxPackets) {
 	if (!state || !state->audioDecodeScaffoldReady) return 0;
 	if (maxPackets <= 0) return 0;
@@ -1107,8 +1358,26 @@ static void ResetAudioDecodeSessionState(VideoPlayerState* state, bool keepSeede
 	}
 	state->audioPacketsRead = 0;
 	state->audioBytesRead = 0;
+	state->decodedPcmFramesAvailable = 0;
+	state->decodedPcmFramesTotal = 0;
+	state->decodedPcmFramesConsumed = 0;
+	state->decodedPcmFramesClockEstimated = 0;
+	state->decodedPcmFramesClockConsumed = 0;
+	state->vorbisPacketsDecoded = 0;
+	state->autoRefillTriggerCount = 0;
+	state->autoRefillPacketsDecoded = 0;
+	state->autoRefillTargetHitCount = 0;
+	state->autoRefillLastLatencyMs = 0.0;
+	state->autoRefillTargetLatencyMs = 0.0;
+	state->autoRefillLatencyGainMsTotal = 0.0;
 	state->audioLastReadPacketTime = 0.0;
+	state->decodedPcmDrainRemainder = 0.0;
 	state->nextAudioPacketIndex = 0;
+#if HAVE_LIBVORBIS
+	state->pcmPlaybackBuffer.clear();
+	state->pcmPlaybackHead = 0;
+	state->pcmFramesFedToStream = 0;
+#endif
 	state->vorbisHeaderParseAttempted = false;
 	state->vorbisIdentificationSeen = false;
 	state->vorbisCommentSeen = false;
@@ -1127,21 +1396,178 @@ static void ResetAudioDecodeSessionState(VideoPlayerState* state, bool keepSeede
 		if (state->vorbisSeedParsedChannels > 0) state->vorbisParsedChannels = state->vorbisSeedParsedChannels;
 		if (state->vorbisSeedParsedSampleRate > 0.0) state->vorbisParsedSampleRate = state->vorbisSeedParsedSampleRate;
 	}
+#if HAVE_LIBVORBIS
+	// Reinitialize the Vorbis decoder so the DSP state is fresh for the new session.
+	if (state->vorbisCodecPrivateHeaders.size() == 3) {
+		if (InitVorbisDecoderFromHeaders(state)) {
+			state->audioDecodePath = "vorbis-libvorbis";
+		}
+	}
+#endif
 }
 
-static bool DecodeDesktopAudioPacketStub(VideoPlayerState* state, uint32_t* outPacketIndex, double* outPacketPts, size_t* outPacketBytes) {
+static bool DecodeDesktopAudioPacketStub(VideoPlayerState* state, uint32_t* outPacketIndex, double* outPacketPts, size_t* outPacketBytes,
+	int* outDecodedSamples, int* outDecodedChannels, double* outDecodedSampleRate) {
 	if (!state) return false;
 	if (state->nextAudioPacketIndex >= state->audioPackets.size()) return false;
 	std::vector<unsigned char> packet;
 	if (!ReadDesktopAudioPacketAtIndex(state, state->nextAudioPacketIndex, &packet)) return false;
+
+	int decodedSamples = 0;
+	int decodedChannels = state->audioChannels;
+	double decodedSampleRate = state->audioSampleRate;
+
+	if (state->audioCodecName == "A_VORBIS") {
+		uint8_t headerType = 0;
+		bool isHeaderPacket = IsVorbisHeaderPacket(packet, &headerType);
+		UpdateVorbisHeaderScaffold(state, packet);
+		if (!isHeaderPacket && IsAudioDecodeReady(state)) {
+#if HAVE_LIBVORBIS
+			if (state->vorbisDecoderInited) {
+				ogg_packet op;
+				memset(&op, 0, sizeof(op));
+				op.packet    = packet.data();
+				op.bytes     = (long)packet.size();
+				op.b_o_s     = 0;
+				op.e_o_s     = 0;
+				op.granulepos = -1;
+				op.packetno  = (ogg_int64_t)state->nextAudioPacketIndex;
+				if (vorbis_synthesis(&state->vorbisBlock, &op) == 0) {
+					vorbis_synthesis_blockin(&state->vorbisState, &state->vorbisBlock);
+					float** pcm = nullptr;
+					int samples;
+					int ch = state->vorbisInfo.channels > 0 ? state->vorbisInfo.channels : 1;
+					while ((samples = vorbis_synthesis_pcmout(&state->vorbisState, &pcm)) > 0) {
+						// Interleave float PCM channels into playback buffer
+						for (int s = 0; s < samples; s++) {
+							for (int c = 0; c < ch; c++) {
+								state->pcmPlaybackBuffer.push_back(pcm[c][s]);
+							}
+						}
+						decodedSamples += samples;
+						vorbis_synthesis_read(&state->vorbisState, samples);
+					}
+				}
+			} else {
+				decodedSamples = EstimateVorbisPacketDecodedSamples(state, state->nextAudioPacketIndex);
+			}
+#else
+			decodedSamples = EstimateVorbisPacketDecodedSamples(state, state->nextAudioPacketIndex);
+#endif
+			if (decodedSamples > 0) {
+#if HAVE_LIBVORBIS
+				// When real PCM is buffered in pcmPlaybackBuffer, decodedPcmFramesAvailable
+				// is kept accurate by FeedAudioStreamFromBuffer; only bump the estimate-path total here.
+				if (!state->vorbisDecoderInited) {
+					state->decodedPcmFramesAvailable += (uint64_t)decodedSamples;
+				}
+#else
+				state->decodedPcmFramesAvailable += (uint64_t)decodedSamples;
+#endif
+				state->decodedPcmFramesTotal += (uint64_t)decodedSamples;
+				state->vorbisPacketsDecoded += 1;
+			}
+		}
+		if (decodedChannels <= 0 && state->vorbisParsedChannels > 0) decodedChannels = state->vorbisParsedChannels;
+		if (decodedSampleRate <= 0.0 && state->vorbisParsedSampleRate > 0.0) decodedSampleRate = state->vorbisParsedSampleRate;
+	}
+
 	if (outPacketIndex) *outPacketIndex = (uint32_t)state->nextAudioPacketIndex;
 	if (outPacketPts) *outPacketPts = state->audioPackets[state->nextAudioPacketIndex].pts;
 	if (outPacketBytes) *outPacketBytes = packet.size();
+	if (outDecodedSamples) *outDecodedSamples = decodedSamples;
+	if (outDecodedChannels) *outDecodedChannels = decodedChannels;
+	if (outDecodedSampleRate) *outDecodedSampleRate = decodedSampleRate;
 	state->audioPacketsRead += 1;
 	state->audioBytesRead += (uint64_t)packet.size();
 	state->audioLastReadPacketTime = state->audioPackets[state->nextAudioPacketIndex].pts;
 	state->nextAudioPacketIndex += 1;
 	return true;
+}
+
+static uint64_t ConsumeDecodedPcmFrames(VideoPlayerState* state, uint64_t wantedFrames) {
+	if (!state) return 0;
+	if (wantedFrames == 0 || wantedFrames > state->decodedPcmFramesAvailable) wantedFrames = state->decodedPcmFramesAvailable;
+	state->decodedPcmFramesAvailable -= wantedFrames;
+	state->decodedPcmFramesConsumed += wantedFrames;
+	return wantedFrames;
+}
+
+static uint64_t ConsumeDecodedPcmFramesByMediaDelta(VideoPlayerState* state, double mediaDeltaSeconds) {
+	if (!state) return 0;
+	if (mediaDeltaSeconds <= 0.0) return 0;
+
+	double sampleRate = GetEffectiveAudioSampleRate(state);
+	if (sampleRate <= 0.0) return 0;
+
+	double exactFrames = mediaDeltaSeconds * sampleRate + state->decodedPcmDrainRemainder;
+	if (exactFrames < 1.0) {
+		state->decodedPcmDrainRemainder = exactFrames;
+		return 0;
+	}
+
+	uint64_t wanted = (uint64_t)floor(exactFrames);
+	state->decodedPcmDrainRemainder = exactFrames - (double)wanted;
+	state->decodedPcmFramesClockEstimated += wanted;
+	uint64_t consumed = ConsumeDecodedPcmFrames(state, wanted);
+	state->decodedPcmFramesClockConsumed += consumed;
+	return consumed;
+}
+
+static uint64_t GetDecodedPcmClockDriftFrames(const VideoPlayerState* state) {
+	if (!state) return 0;
+	if (state->decodedPcmFramesClockEstimated <= state->decodedPcmFramesClockConsumed) return 0;
+	return state->decodedPcmFramesClockEstimated - state->decodedPcmFramesClockConsumed;
+}
+
+static double GetDecodedQueueLatencyMs(const VideoPlayerState* state) {
+	if (!state) return 0.0;
+	double sampleRate = GetEffectiveAudioSampleRate(state);
+	if (sampleRate <= 0.0) return 0.0;
+	return ((double)state->decodedPcmFramesAvailable / sampleRate) * 1000.0;
+}
+
+static int AutoRefillDecodedQueue(VideoPlayerState* state, double lowLatencyMs, double targetLatencyMs, int maxPacketsPerTick) {
+	if (!state) return 0;
+	if (maxPacketsPerTick <= 0) return 0;
+	if (!state->audioDecodeScaffoldReady) return 0;
+	if (state->nextAudioPacketIndex >= state->audioPackets.size()) return 0;
+
+	double latencyMs = GetDecodedQueueLatencyMs(state);
+	state->autoRefillLastLatencyMs = latencyMs;
+	state->autoRefillTargetLatencyMs = targetLatencyMs;
+	if (latencyMs >= lowLatencyMs) return 0;
+	state->autoRefillTriggerCount += 1;
+
+	int consumedPackets = 0;
+	while (consumedPackets < maxPacketsPerTick && state->nextAudioPacketIndex < state->audioPackets.size()) {
+		uint32_t packetIndex = 0;
+		double packetPts = 0.0;
+		size_t packetBytes = 0;
+		int decodedSamples = 0;
+		int decodedChannels = 0;
+		double decodedSampleRate = 0.0;
+		if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes, &decodedSamples, &decodedChannels, &decodedSampleRate)) {
+			break;
+		}
+		consumedPackets += 1;
+		if (targetLatencyMs > 0.0 && GetDecodedQueueLatencyMs(state) >= targetLatencyMs) break;
+	}
+	state->autoRefillPacketsDecoded += (uint32_t)consumedPackets;
+	double postRefillLatencyMs = GetDecodedQueueLatencyMs(state);
+	state->autoRefillLastLatencyMs = postRefillLatencyMs;
+	if (postRefillLatencyMs > latencyMs) {
+		state->autoRefillLatencyGainMsTotal += (postRefillLatencyMs - latencyMs);
+	}
+	bool hitTarget = false;
+	if (targetLatencyMs > 0.0) {
+		hitTarget = (postRefillLatencyMs >= targetLatencyMs);
+	} else {
+		hitTarget = (consumedPackets > 0);
+	}
+	if (hitTarget) state->autoRefillTargetHitCount += 1;
+
+	return consumedPackets;
 }
 
 static VideoPlayerState* LoadDesktopVideo(const char* path) {
@@ -1177,6 +1603,7 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 	int webmVorbisParsedChannels = 0;
 	double webmVorbisParsedSampleRate = 0.0;
 	bool webmVorbisHeadersFromCodecPrivate = false;
+	std::vector<std::vector<unsigned char>> webmVorbisCodecPrivateHeaders;
 	std::vector<EncodedFrame> webmFrames;
 	std::vector<EncodedFrame> webmAudioPackets;
 
@@ -1193,7 +1620,7 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 		&webmHasAudio, &webmAudioCodec, &webmAudioSampleRate, &webmAudioChannels, &webmAudioPackets,
 		&webmVorbisHeaderParseAttempted, &webmVorbisIdentificationSeen, &webmVorbisCommentSeen,
 		&webmVorbisSetupSeen, &webmVorbisParsedChannels, &webmVorbisParsedSampleRate,
-		&webmVorbisHeadersFromCodecPrivate)) {
+		&webmVorbisHeadersFromCodecPrivate, &webmVorbisCodecPrivateHeaders)) {
 		state->container = "webm";
 		state->codecName = "vp8";
 		state->width = webmW;
@@ -1251,10 +1678,20 @@ static VideoPlayerState* LoadDesktopVideo(const char* path) {
 		state->vorbisSeedHeadersFromCodecPrivate = webmVorbisHeadersFromCodecPrivate;
 		state->vorbisSeedParsedChannels = webmVorbisParsedChannels;
 		state->vorbisSeedParsedSampleRate = webmVorbisParsedSampleRate;
+		state->vorbisCodecPrivateHeaders = webmVorbisCodecPrivateHeaders;
 		ResetAudioDecodeSessionState(state, true, false);
 		if (state->audioChannels <= 0 && state->vorbisParsedChannels > 0) state->audioChannels = state->vorbisParsedChannels;
 		if (state->audioSampleRate <= 0.0 && state->vorbisParsedSampleRate > 0.0) state->audioSampleRate = state->vorbisParsedSampleRate;
 	}
+#if HAVE_LIBVORBIS
+	if (state->vorbisDecoderInited && state->audioChannels > 0 && state->audioSampleRate > 0.0) {
+		state->audioStream = LoadAudioStream(
+			(unsigned int)state->audioSampleRate, 32u, (unsigned int)state->audioChannels);
+		if (IsAudioStreamValid(state->audioStream)) {
+			state->audioStreamInited = true;
+		}
+	}
+#endif
 	state->valid = true;
 	return state;
 }
@@ -1276,6 +1713,15 @@ static void DestroyVideoPlayer(VideoPlayerState* state) {
 	if (state->codecInited) {
 		vpx_codec_destroy(&state->codec);
 		state->codecInited = false;
+	}
+#endif
+#if HAVE_LIBVORBIS
+	ClearVorbisDecoder(state);
+	if (state->audioStreamInited) {
+		if (state->audioStreamPlaying) StopAudioStream(state->audioStream);
+		UnloadAudioStream(state->audioStream);
+		state->audioStreamInited = false;
+		state->audioStreamPlaying = false;
 	}
 #endif
 	if (state->fp) {
@@ -1390,6 +1836,15 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (state->finished && !RewindDesktopVideo(state)) return IntrinsicResult::Null;
 #endif
 		state->playing = true;
+		state->syncMode = "wall-clock";
+		state->audioSyncOffsetPrimed = false;
+#if HAVE_LIBVORBIS
+		if (state->audioStreamInited && !state->audioStreamPlaying) {
+			PlayAudioStream(state->audioStream);
+			state->audioStreamPlaying = true;
+			if (state->audioLedSyncEnabled) PrimeAudioSyncOffset(state);
+		}
+#endif
 		state->playBaseClock = GetTime();
 		state->playBaseTime = state->timePlayed;
 		state->lastObservedTime = state->timePlayed;
@@ -1409,6 +1864,16 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (state->webPlayer) WebVideoPause(state->webHandle);
 #endif
 		state->playing = false;
+		state->syncMode = "wall-clock";
+#if HAVE_LIBVORBIS
+		state->audioSyncOffsetPrimed = false;
+#endif
+#if HAVE_LIBVORBIS
+		if (state->audioStreamPlaying) {
+			PauseAudioStream(state->audioStream);
+			state->audioStreamPlaying = false;
+		}
+#endif
 		SyncVideoStateValue(videoVal, state);
 		return IntrinsicResult::Null;
 	};
@@ -1425,6 +1890,15 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			if (state->webPlayer) WebVideoPlay(state->webHandle);
 #endif
 			state->playing = true;
+			state->syncMode = "wall-clock";
+			state->audioSyncOffsetPrimed = false;
+#if HAVE_LIBVORBIS
+			if (state->audioStreamInited && !state->audioStreamPlaying) {
+				ResumeAudioStream(state->audioStream);
+				state->audioStreamPlaying = true;
+				if (state->audioLedSyncEnabled) PrimeAudioSyncOffset(state);
+			}
+#endif
 			state->playBaseClock = GetTime();
 			state->playBaseTime = state->timePlayed;
 			state->lastObservedTime = state->timePlayed;
@@ -1442,6 +1916,8 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		state->playing = false;
+		state->syncMode = "wall-clock";
+		state->audioSyncOffsetPrimed = false;
 #ifdef PLATFORM_WEB
 		if (state->webPlayer) {
 			WebVideoStop(state->webHandle);
@@ -1487,6 +1963,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		state->timePlayed = pos;
 		state->finished = false;
 #endif
+		state->audioSyncOffsetPrimed = false;
 		state->playBaseClock = GetTime();
 		state->playBaseTime = pos;
 		state->lastObservedTime = pos;
@@ -1525,8 +2002,34 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		}
 #else
 		if (state->playing && !state->finished) {
-			double targetTime = state->playBaseTime + (GetTime() - state->playBaseClock) * state->playbackRate;
-			if (targetTime < 0.0) targetTime = 0.0;
+			double prevMediaTime = state->timePlayed;
+			double wallClockTarget = state->playBaseTime + (GetTime() - state->playBaseClock) * state->playbackRate;
+			if (wallClockTarget < 0.0) wallClockTarget = 0.0;
+			double targetTime = wallClockTarget;
+			state->syncMode = "wall-clock";
+			state->lastAudioClockSec = 0.0;
+			state->lastAudioLedTargetSec = 0.0;
+
+#if HAVE_LIBVORBIS
+			if (state->audioLedSyncEnabled && state->audioStreamInited && state->audioStreamPlaying) {
+				double syncSampleRate = GetEffectiveAudioSampleRate(state);
+				if (syncSampleRate > 0.0) {
+					double audioClockSec = GetAudioStreamClockSec(state);
+					if (!state->audioSyncOffsetPrimed) PrimeAudioSyncOffset(state);
+					double audioLedTarget = audioClockSec + state->audioSyncOffsetSec;
+					double clampWindowSec = state->audioSyncClampWindowMs / 1000.0;
+					if (clampWindowSec > 0.0) {
+						if (audioLedTarget > wallClockTarget + clampWindowSec) audioLedTarget = wallClockTarget + clampWindowSec;
+						if (audioLedTarget < wallClockTarget - clampWindowSec) audioLedTarget = wallClockTarget - clampWindowSec;
+					}
+					if (audioLedTarget < 0.0) audioLedTarget = 0.0;
+					targetTime = audioLedTarget;
+					state->syncMode = "audio-stream";
+					state->lastAudioClockSec = audioClockSec;
+					state->lastAudioLedTargetSec = audioLedTarget;
+				}
+			}
+#endif
 
 			if (state->looping && state->timeLength > 0.0) {
 				double wrapped = fmod(targetTime, state->timeLength);
@@ -1534,8 +2037,25 @@ void AddRVideoMethods(ValueDict raylibModule) {
 				if (wrapped + 0.0005 < state->timePlayed) {
 					state->loopEventPending = true;
 					if (!RewindDesktopVideo(state)) return IntrinsicResult::Null;
+#if HAVE_LIBVORBIS
+					if (state->audioStreamInited) {
+						PlayAudioStream(state->audioStream);
+						state->audioStreamPlaying = true;
+						if (state->audioLedSyncEnabled) PrimeAudioSyncOffset(state);
+					}
+#endif
 				}
 				targetTime = wrapped;
+			}
+
+			// Skip stale frames so decode budget is spent on frames near targetTime.
+			// Any frame whose PTS is more than one frame-interval behind targetTime
+			// will never be visible; fast-forward past it without decoding.
+			double oneFrameInterval = (state->frameRate > 1.0) ? (1.0 / state->frameRate) : (1.0 / 30.0);
+			while (state->nextFrameIndex + 1 < state->frames.size()
+			       && state->frames[state->nextFrameIndex].pts < targetTime - oneFrameInterval) {
+				state->nextFrameIndex++;
+				state->totalFramesSkipped++;
 			}
 
 			int decoded = 0;
@@ -1548,8 +2068,47 @@ void AddRVideoMethods(ValueDict raylibModule) {
 				}
 				decoded += 1;
 			}
+			state->lastDecodeBudgetUsed = decoded;
+			state->lastDecodeBudgetExhausted = (decoded >= decodeBudget)
+				&& (state->nextFrameIndex < state->frames.size())
+				&& (state->frames[state->nextFrameIndex].pts <= targetTime + 0.0005);
+			if (state->lastDecodeBudgetExhausted) state->totalFrameDropEvents++;
+			state->lastUpdateTargetPts = targetTime;
 			state->timePlayed = targetTime;
 			if (state->timeLength > 0.0 && state->timePlayed > state->timeLength) state->timePlayed = state->timeLength;
+			double mediaDelta = state->timePlayed - prevMediaTime;
+#if HAVE_LIBVORBIS
+			if (state->audioStreamInited) {
+				if (state->hasAudio && state->audioDecodeScaffoldReady) {
+					AutoRefillDecodedQueue(state, 150.0, 400.0, 16);
+				}
+				FeedAudioStreamFromBuffer(state);
+				double syncSampleRate = GetEffectiveAudioSampleRate(state);
+				if (syncSampleRate > 0.0 && state->pcmFramesFedToStream > 0) {
+					double audioFedSec = (double)state->pcmFramesFedToStream / syncSampleRate;
+					state->videoAudioSyncSkewMs = (state->timePlayed - audioFedSec) * 1000.0;
+				}
+			} else {
+#endif
+			if (mediaDelta > 0.0 && state->decodedPcmFramesAvailable > 0) {
+				ConsumeDecodedPcmFramesByMediaDelta(state, mediaDelta);
+			}
+			// Compute audio-sync skew: how far ahead the video clock is vs audio-consumed position.
+			// Positive = video leads audio, 0 = in sync, negative = video behind audio.
+			{
+				double syncSampleRate = GetEffectiveAudioSampleRate(state);
+				if (syncSampleRate > 0.0 && state->decodedPcmFramesConsumed > 0) {
+					double audioPositionSec = (double)state->decodedPcmFramesConsumed / syncSampleRate;
+					state->videoAudioSyncSkewMs = (state->timePlayed - audioPositionSec) * 1000.0;
+				}
+			}
+			if (state->hasAudio && state->audioDecodeScaffoldReady) {
+				// Keep a small decoded queue buffered to emulate real decode+drain stabilization.
+				AutoRefillDecodedQueue(state, 60.0, 140.0, 12);
+			}
+#if HAVE_LIBVORBIS
+			}
+#endif
 			if (!state->looping && state->nextFrameIndex >= state->frames.size() && state->timePlayed >= state->timeLength - 0.0005) {
 				state->finished = true;
 				state->playing = false;
@@ -1703,6 +2262,43 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		return IntrinsicResult(Value(info));
 	};
 	raylibModule.SetValue("GetVideoAudioDecodeStatuses", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+
+		ValueDict info;
+		info.SetValue(String("backend"), Value(String(state->webPlayer ? "web" : "desktop")));
+		info.SetValue(String("hasAudio"), Value(state->hasAudio ? 1 : 0));
+		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
+		info.SetValue(String("decodePath"), Value(String(state->audioDecodePath.c_str())));
+		info.SetValue(String("decodeScaffoldSupported"), Value(state->audioDecodeScaffoldReady ? 1 : 0));
+		info.SetValue(String("readyForDecode"), Value(IsAudioDecodeReady(state) ? 1 : 0));
+		info.SetValue(String("sessionGuardSupported"), Value(1));
+		info.SetValue(String("statusConstantsSupported"), Value(1));
+		info.SetValue(String("readinessHelperSupported"), Value(1));
+		info.SetValue(String("batchDecodeSupported"), Value(1));
+		int decoderWired = (!state->webPlayer && state->audioCodecName == "A_VORBIS") ? 1 : 0;
+		info.SetValue(String("decoderWired"), Value(decoderWired));
+#if HAVE_LIBVORBIS
+		int playbackWiredVal = state->audioStreamInited ? 1 : 0;
+		info.SetValue(String("playbackWired"), Value(playbackWiredVal));
+		info.SetValue(String("avSyncWired"), Value(playbackWiredVal));
+#else
+		info.SetValue(String("playbackWired"), Value::zero);
+		info.SetValue(String("avSyncWired"), Value::zero);
+#endif
+		info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
+		info.SetValue(String("decodedPcmFramesTotal"), Value((double)state->decodedPcmFramesTotal));
+		info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
+		info.SetValue(String("decodedVorbisPackets"), Value((int)state->vorbisPacketsDecoded));
+		info.SetValue(String("status"), Value(String("ok")));
+		info.SetValue(String("message"), Value(String("audio decode/playback capability snapshot")));
+		return IntrinsicResult(Value(info));
+	};
+	raylibModule.SetValue("GetVideoAudioDecodeCapabilities", i->GetFunc());
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");
@@ -1888,6 +2484,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
 		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
 		info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
 
 #ifdef PLATFORM_WEB
@@ -1924,7 +2521,10 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		uint32_t packetIndex = 0;
 		double packetPts = 0.0;
 		size_t packetBytes = 0;
-		if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes)) {
+		int decodedSamples = 0;
+		int decodedChannels = state->audioChannels;
+		double decodedSampleRate = state->audioSampleRate;
+		if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes, &decodedSamples, &decodedChannels, &decodedSampleRate)) {
 			info.SetValue(String("status"), Value(String("read-failed")));
 			info.SetValue(String("message"), Value(String("failed to read audio packet from stream")));
 			return IntrinsicResult(Value(info));
@@ -1934,10 +2534,24 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("packetIndex"), Value((int)packetIndex));
 		info.SetValue(String("packetPts"), Value(packetPts));
 		info.SetValue(String("packetBytes"), Value((int)packetBytes));
+		info.SetValue(String("decodedSamples"), Value(decodedSamples));
+		info.SetValue(String("decodedChannels"), Value(decodedChannels));
+		info.SetValue(String("decodedSampleRate"), Value(decodedSampleRate));
+#if HAVE_LIBVORBIS
+		if (state->vorbisDecoderInited) {
+			info.SetValue(String("status"), Value(String("ok")));
+			info.SetValue(String("message"), Value(String("packet decoded by libvorbis")));
+		} else {
+			info.SetValue(String("status"), Value(String("decode-not-wired")));
+			info.SetValue(String("message"), Value(String("packet consumed; Vorbis packet decode internals staged, PCM output not wired")));
+		}
+#else
 		info.SetValue(String("status"), Value(String("decode-not-wired")));
-		info.SetValue(String("message"), Value(String("packet consumed; decoder internals not yet wired")));
+		info.SetValue(String("message"), Value(String("packet consumed; Vorbis packet decode internals staged, PCM output not wired")));
+#endif
 		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
 		info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
 		return IntrinsicResult(Value(info));
 #endif
@@ -1975,6 +2589,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("decodeSessionId"), Value((int)s->audioDecodeSessionId));
 			info.SetValue(String("totalReadPackets"), Value((int)s->audioPacketsRead));
 			info.SetValue(String("totalReadBytes"), Value((double)s->audioBytesRead));
+			info.SetValue(String("decodedPcmFramesAvailable"), Value((double)s->decodedPcmFramesAvailable));
 			info.SetValue(String("remainingPackets"), Value((int)(s->audioPackets.size() - s->nextAudioPacketIndex)));
 			return info;
 		};
@@ -2027,7 +2642,10 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			uint32_t packetIndex = 0;
 			double packetPts = 0.0;
 			size_t packetBytes = 0;
-			if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes)) {
+			int decodedSamples = 0;
+			int decodedChannels = state->audioChannels;
+			double decodedSampleRate = state->audioSampleRate;
+			if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes, &decodedSamples, &decodedChannels, &decodedSampleRate)) {
 				info.SetValue(String("status"), Value(String("read-failed")));
 				info.SetValue(String("message"), Value(String("failed to read audio packet from stream")));
 				results.Add(Value(info));
@@ -2038,10 +2656,24 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("packetIndex"), Value((int)packetIndex));
 			info.SetValue(String("packetPts"), Value(packetPts));
 			info.SetValue(String("packetBytes"), Value((int)packetBytes));
+			info.SetValue(String("decodedSamples"), Value(decodedSamples));
+			info.SetValue(String("decodedChannels"), Value(decodedChannels));
+			info.SetValue(String("decodedSampleRate"), Value(decodedSampleRate));
+#if HAVE_LIBVORBIS
+			if (state->vorbisDecoderInited) {
+				info.SetValue(String("status"), Value(String("ok")));
+				info.SetValue(String("message"), Value(String("packet decoded by libvorbis")));
+			} else {
+				info.SetValue(String("status"), Value(String("decode-not-wired")));
+				info.SetValue(String("message"), Value(String("packet consumed; Vorbis packet decode internals staged, PCM output not wired")));
+			}
+#else
 			info.SetValue(String("status"), Value(String("decode-not-wired")));
-			info.SetValue(String("message"), Value(String("packet consumed; decoder internals not yet wired")));
+			info.SetValue(String("message"), Value(String("packet consumed; Vorbis packet decode internals staged, PCM output not wired")));
+#endif
 			info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 			info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+			info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
 			info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
 			results.Add(Value(info));
 		}
@@ -2053,9 +2685,11 @@ void AddRVideoMethods(ValueDict raylibModule) {
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");
+	i->AddParam("expectedSessionId", Value::zero);
 	i->code = INTRINSIC_LAMBDA {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
+		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
 
 		ValueDict info;
 		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
@@ -2064,12 +2698,21 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		int ready = IsAudioDecodeReady(state) ? 1 : 0;
 		int remaining = (int)(state->audioPackets.size() - state->nextAudioPacketIndex);
 		if (remaining < 0) remaining = 0;
+		int sessionId = (int)state->audioDecodeSessionId;
+		int isCurrentSession = 1;
+		if (expectedSessionId > 0 && expectedSessionId != sessionId) isCurrentSession = 0;
 		info.SetValue(String("supported"), Value(supported));
 		info.SetValue(String("readyForDecode"), Value(ready));
-		info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
+		info.SetValue(String("decodeSessionId"), Value(sessionId));
+		info.SetValue(String("expectedSessionId"), Value(expectedSessionId));
+		info.SetValue(String("isCurrentSession"), Value(isCurrentSession));
 		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
 		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
+		info.SetValue(String("decodedPcmFramesTotal"), Value((double)state->decodedPcmFramesTotal));
+		info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
+		info.SetValue(String("decodedVorbisPackets"), Value((int)state->vorbisPacketsDecoded));
 		info.SetValue(String("remainingPackets"), Value(remaining));
 		info.SetValue(String("lastReadPacketTime"), Value(state->audioLastReadPacketTime));
 		info.SetValue(String("vorbisHeaderParseAttempted"), Value(state->vorbisHeaderParseAttempted ? 1 : 0));
@@ -2103,6 +2746,9 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (state->webPlayer) {
 			status = "web-backend";
 			message = "audio decode state is desktop-only";
+		} else if (!isCurrentSession) {
+			status = "session-mismatch";
+			message = "stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession";
 		} else if (!supported) {
 			status = "unsupported-codec";
 			message = "audio decode path is not scaffolded for this codec";
@@ -2211,6 +2857,227 @@ void AddRVideoMethods(ValueDict raylibModule) {
 	};
 	raylibModule.SetValue("IsVideoAudioDecodeReady", i->GetFunc());
 
+		i = Intrinsic::Create("");
+		i->AddParam("video");
+		i->AddParam("maxFrames", Value::zero);
+		i->code = INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+			if (!state || !state->valid) return IntrinsicResult::Null;
+			int maxFrames = context->GetVar(String("maxFrames")).IntValue();
+
+			ValueDict info;
+			info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
+			info.SetValue(String("requestedFrames"), Value(maxFrames));
+			info.SetValue(String("consumedFrames"), Value::zero);
+
+	#ifdef PLATFORM_WEB
+			info.SetValue(String("status"), Value(String("web-backend")));
+			info.SetValue(String("message"), Value(String("decoded PCM frame consumption helper is desktop-only")));
+			info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
+			info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
+			return IntrinsicResult(Value(info));
+	#else
+			if (state->webPlayer) {
+				info.SetValue(String("status"), Value(String("web-backend")));
+				info.SetValue(String("message"), Value(String("decoded PCM frame consumption helper is desktop-only")));
+				info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
+				info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
+				return IntrinsicResult(Value(info));
+			}
+
+			uint64_t wanted = 0;
+			if (maxFrames > 0) wanted = (uint64_t)maxFrames;
+			uint64_t consumed = ConsumeDecodedPcmFrames(state, wanted);
+			info.SetValue(String("consumedFrames"), Value((double)consumed));
+			info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
+			info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
+			info.SetValue(String("status"), Value(String("ok")));
+			info.SetValue(String("message"), Value(String("decoded PCM frames consumed from placeholder queue")));
+			return IntrinsicResult(Value(info));
+	#endif
+		};
+		raylibModule.SetValue("ConsumeVideoDecodedPcmFrames", i->GetFunc());
+
+		i = Intrinsic::Create("");
+		i->AddParam("video");
+		i->code = INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+			if (!state || !state->valid) return IntrinsicResult::Null;
+			double effectiveSampleRate = GetEffectiveAudioSampleRate(state);
+			int effectiveChannels = GetEffectiveAudioChannels(state);
+			uint64_t driftFrames = GetDecodedPcmClockDriftFrames(state);
+			double refillPacketsPerTrigger = 0.0;
+			double refillLatencyGainMs = 0.0;
+			double refillTargetHitRate = 0.0;
+			if (state->autoRefillTriggerCount > 0) {
+				refillPacketsPerTrigger = (double)state->autoRefillPacketsDecoded / (double)state->autoRefillTriggerCount;
+				refillLatencyGainMs = state->autoRefillLatencyGainMsTotal / (double)state->autoRefillTriggerCount;
+				refillTargetHitRate = (double)state->autoRefillTargetHitCount / (double)state->autoRefillTriggerCount;
+				if (refillTargetHitRate < 0.0) refillTargetHitRate = 0.0;
+				if (refillTargetHitRate > 1.0) refillTargetHitRate = 1.0;
+			}
+
+			ValueDict info;
+			info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
+			info.SetValue(String("availableFrames"), Value((double)state->decodedPcmFramesAvailable));
+			info.SetValue(String("consumedFrames"), Value((double)state->decodedPcmFramesConsumed));
+			info.SetValue(String("totalDecodedFrames"), Value((double)state->decodedPcmFramesTotal));
+			info.SetValue(String("clockEstimatedFrames"), Value((double)state->decodedPcmFramesClockEstimated));
+			info.SetValue(String("clockConsumedFrames"), Value((double)state->decodedPcmFramesClockConsumed));
+			info.SetValue(String("clockDriftFrames"), Value((double)driftFrames));
+			info.SetValue(String("decodedVorbisPackets"), Value((int)state->vorbisPacketsDecoded));
+			info.SetValue(String("autoRefillTriggerCount"), Value((int)state->autoRefillTriggerCount));
+			info.SetValue(String("autoRefillPacketsDecoded"), Value((int)state->autoRefillPacketsDecoded));
+			info.SetValue(String("autoRefillTargetHitCount"), Value((int)state->autoRefillTargetHitCount));
+			info.SetValue(String("refillPacketsPerTrigger"), Value(refillPacketsPerTrigger));
+			info.SetValue(String("refillLatencyGainMs"), Value(refillLatencyGainMs));
+			info.SetValue(String("refillTargetHitRate"), Value(refillTargetHitRate));
+			info.SetValue(String("sampleRate"), Value(effectiveSampleRate));
+			info.SetValue(String("channels"), Value(effectiveChannels));
+			info.SetValue(String("syncMode"), Value(String(state->syncMode.c_str())));
+			info.SetValue(String("audioLedSyncEnabled"), Value(state->audioLedSyncEnabled ? 1 : 0));
+			info.SetValue(String("audioSyncClampWindowMs"), Value(state->audioSyncClampWindowMs));
+			info.SetValue(String("audioSyncOffsetSec"), Value(state->audioSyncOffsetSec));
+			info.SetValue(String("audioClockSec"), Value(state->lastAudioClockSec));
+			info.SetValue(String("audioLedTargetSec"), Value(state->lastAudioLedTargetSec));
+
+			double latencyMs = 0.0;
+			if (effectiveSampleRate > 0.0) latencyMs = ((double)state->decodedPcmFramesAvailable / effectiveSampleRate) * 1000.0;
+			info.SetValue(String("latencyMs"), Value(latencyMs));
+			double driftMs = 0.0;
+			if (effectiveSampleRate > 0.0) driftMs = ((double)driftFrames / effectiveSampleRate) * 1000.0;
+			info.SetValue(String("clockDriftMs"), Value(driftMs));
+			info.SetValue(String("autoRefillLastLatencyMs"), Value(state->autoRefillLastLatencyMs));
+			info.SetValue(String("autoRefillTargetLatencyMs"), Value(state->autoRefillTargetLatencyMs));
+			double estimatedBufferingMarginMs = latencyMs - state->autoRefillTargetLatencyMs;
+			info.SetValue(String("estimatedBufferingMarginMs"), Value(estimatedBufferingMarginMs));
+
+			// Tuning hints based on refillTargetHitRate distribution
+			const char* tuningHint = "insufficient-data";
+			double suggestedAdjustmentMs = 0.0;
+			int minTriggersForReliableHint = 5;
+			
+			if (state->autoRefillTriggerCount >= minTriggersForReliableHint) {
+				if (refillTargetHitRate >= 0.9) {
+					tuningHint = "increase-target";
+					// Target is too conservative; suggest increase based on average gain
+					suggestedAdjustmentMs = refillLatencyGainMs * 0.5;  // Use 50% of average gain
+				} else if (refillTargetHitRate >= 0.5 && refillTargetHitRate < 0.9) {
+					tuningHint = "optimal";
+					suggestedAdjustmentMs = 0.0;
+				} else if (refillTargetHitRate < 0.5) {
+					tuningHint = "decrease-target";
+					// Target is too aggressive; suggest decrease
+					// Use margin as guide: if margin is very negative, reduce more aggressively
+					if (estimatedBufferingMarginMs < -50.0) {
+						suggestedAdjustmentMs = -40.0;
+					} else if (estimatedBufferingMarginMs < -20.0) {
+						suggestedAdjustmentMs = -20.0;
+					} else {
+						suggestedAdjustmentMs = -10.0;
+					}
+				}
+			}
+			
+			info.SetValue(String("tuningHint"), Value(String(tuningHint)));
+			info.SetValue(String("suggestedAdjustmentMs"), Value(suggestedAdjustmentMs));
+
+			const char* status = "ok";
+			const char* message = "audio decode queue telemetry";
+	#ifdef PLATFORM_WEB
+			status = "web-backend";
+			message = "audio queue telemetry helper is desktop-only";
+	#else
+			if (state->webPlayer) {
+				status = "web-backend";
+				message = "audio queue telemetry helper is desktop-only";
+			} else if (!state->hasAudio) {
+				status = "not-ready";
+				message = "video has no audio stream";
+			} else if (!state->audioDecodeScaffoldReady) {
+				status = "unsupported-codec";
+				message = "audio decode path is not scaffolded for this codec";
+			}
+	#endif
+			info.SetValue(String("status"), Value(String(status)));
+			info.SetValue(String("message"), Value(String(message)));
+			return IntrinsicResult(Value(info));
+		};
+		raylibModule.SetValue("GetVideoAudioQueueState", i->GetFunc());
+
+		i = Intrinsic::Create("");
+		i->AddParam("video");
+		i->AddParam("enabled", Value(1));
+		i->AddParam("clampWindowMs", Value(120.0));
+		i->code = INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+			if (!state || !state->valid) return IntrinsicResult::Null;
+			int enabled = context->GetVar(String("enabled")).IntValue();
+			double clampWindowMs = context->GetVar(String("clampWindowMs")).DoubleValue();
+			if (clampWindowMs < 0.0) clampWindowMs = 0.0;
+			if (clampWindowMs > 1000.0) clampWindowMs = 1000.0;
+			state->audioLedSyncEnabled = (enabled != 0);
+			state->audioSyncClampWindowMs = clampWindowMs;
+			state->audioSyncOffsetPrimed = false;
+
+			ValueDict info;
+			info.SetValue(String("audioLedSyncEnabled"), Value(state->audioLedSyncEnabled ? 1 : 0));
+			info.SetValue(String("audioSyncClampWindowMs"), Value(state->audioSyncClampWindowMs));
+			info.SetValue(String("status"), Value(String("ok")));
+			info.SetValue(String("message"), Value(String("audio sync tuning updated")));
+			return IntrinsicResult(Value(info));
+		};
+		raylibModule.SetValue("SetVideoAudioSyncTuning", i->GetFunc());
+
+		i = Intrinsic::Create("");
+		i->AddParam("video");
+		i->code = INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+			if (!state || !state->valid) return IntrinsicResult::Null;
+			ValueDict info;
+			info.SetValue(String("syncMode"), Value(String(state->syncMode.c_str())));
+			info.SetValue(String("audioLedSyncEnabled"), Value(state->audioLedSyncEnabled ? 1 : 0));
+			info.SetValue(String("audioSyncClampWindowMs"), Value(state->audioSyncClampWindowMs));
+			info.SetValue(String("audioSyncOffsetSec"), Value(state->audioSyncOffsetSec));
+			info.SetValue(String("audioClockSec"), Value(state->lastAudioClockSec));
+			info.SetValue(String("audioLedTargetSec"), Value(state->lastAudioLedTargetSec));
+			info.SetValue(String("status"), Value(String("ok")));
+			info.SetValue(String("message"), Value(String("audio sync tuning snapshot")));
+			return IntrinsicResult(Value(info));
+		};
+		raylibModule.SetValue("GetVideoAudioSyncTuning", i->GetFunc());
+
+		i = Intrinsic::Create("");
+		i->AddParam("video");
+		i->code = INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+			if (!state || !state->valid) return IntrinsicResult::Null;
+			ValueDict info;
+			info.SetValue(String("syncMode"), Value(String(state->syncMode.c_str())));
+			info.SetValue(String("videoAudioSyncSkewMs"), Value(state->videoAudioSyncSkewMs));
+			info.SetValue(String("totalFramesDecoded"), Value((int)state->totalFramesDecoded));
+			info.SetValue(String("totalFramesSkipped"), Value((int)state->totalFramesSkipped));
+			info.SetValue(String("totalFrameDropEvents"), Value((int)state->totalFrameDropEvents));
+			info.SetValue(String("lastDecodeBudgetUsed"), Value(state->lastDecodeBudgetUsed));
+			info.SetValue(String("lastDecodeBudgetExhausted"), Value(state->lastDecodeBudgetExhausted ? 1 : 0));
+			info.SetValue(String("lastDecodedFramePts"), Value(state->lastDecodedFramePts));
+			info.SetValue(String("lastUpdateTargetPts"), Value(state->lastUpdateTargetPts));
+			info.SetValue(String("audioLedSyncEnabled"), Value(state->audioLedSyncEnabled ? 1 : 0));
+			info.SetValue(String("audioSyncClampWindowMs"), Value(state->audioSyncClampWindowMs));
+			info.SetValue(String("audioSyncOffsetSec"), Value(state->audioSyncOffsetSec));
+			info.SetValue(String("audioClockSec"), Value(state->lastAudioClockSec));
+			info.SetValue(String("audioLedTargetSec"), Value(state->lastAudioLedTargetSec));
+			int framesBuffered = 0;
+#if HAVE_LIBVPX
+			if (!state->webPlayer && state->nextFrameIndex < state->frames.size()) {
+				framesBuffered = (int)(state->frames.size() - state->nextFrameIndex);
+			}
+#endif
+			info.SetValue(String("framesBuffered"), Value(framesBuffered));
+			return IntrinsicResult(Value(info));
+		};
+		raylibModule.SetValue("GetVideoFrameTimingDiagnostics", i->GetFunc());
+
 	i = Intrinsic::Create("");
 	i->AddParam("video");
 	i->AddParam("keepSeededHeaders", Value(1));
@@ -2238,6 +3105,10 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("nextPacketIndex"), Value((int)state->nextAudioPacketIndex));
 		info.SetValue(String("totalReadPackets"), Value((int)state->audioPacketsRead));
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
+		info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
+		info.SetValue(String("decodedPcmFramesTotal"), Value((double)state->decodedPcmFramesTotal));
+		info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
+		info.SetValue(String("decodedVorbisPackets"), Value((int)state->vorbisPacketsDecoded));
 		info.SetValue(String("remainingPackets"), Value(remaining));
 		info.SetValue(String("lastReadPacketTime"), Value(state->audioLastReadPacketTime));
 		info.SetValue(String("vorbisHeaderParseAttempted"), Value(state->vorbisHeaderParseAttempted ? 1 : 0));

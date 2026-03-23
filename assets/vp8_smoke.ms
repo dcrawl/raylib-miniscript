@@ -95,10 +95,20 @@ while not rl.WindowShouldClose
 	rl.EndDrawing
 end while
 
+timingDiag = rl.GetVideoFrameTimingDiagnostics(video)
 rl.UnloadVideoStream video
 if not looping and finishCount < 1 then
 	print "VP8 smoke failed: DidVideoFinish not observed"
 	print "video error=" + rl.GetVideoLastError(video)
 	exit 1
 end if
+if timingDiag == null then
+	print "VP8 smoke failed: GetVideoFrameTimingDiagnostics returned null"
+	exit 1
+end if
+if timingDiag.totalFramesDecoded < 1 then
+	print "VP8 smoke failed: expected totalFramesDecoded >= 1 after playback"
+	exit 1
+end if
+print "VP8 smoke timing: decoded=" + str(timingDiag.totalFramesDecoded) + " skipped=" + str(timingDiag.totalFramesSkipped) + " dropEvents=" + str(timingDiag.totalFrameDropEvents) + " syncMode=" + timingDiag.syncMode + " audioSyncSkewMs=" + str(timingDiag.videoAudioSyncSkewMs)
 print "VP8 smoke done: finish=" + str(finishCount) + " loop=" + str(loopCount)

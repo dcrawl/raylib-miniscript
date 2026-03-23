@@ -122,22 +122,32 @@ run_case() {
       ;;
     vp8_audio_diag_scaffold_smoke)
       if /usr/bin/grep -q "audio diag: packets=" "$log" \
+        && /usr/bin/grep -q "audio decode capabilities:" "$log" \
+        && /usr/bin/grep -q "audio decode capabilities post-decode:" "$log" \
         && /usr/bin/grep -q "audio scaffold: supported=" "$log" \
         && /usr/bin/grep -q "audio decode session start:" "$log" \
         && /usr/bin/grep -q "audio decode ready check:" "$log" \
+        && /usr/bin/grep -q "audio decode ready expectedSessionId echo:" "$log" \
         && /usr/bin/grep -q "audio decode stale ready check:" "$log" \
+        && /usr/bin/grep -q "audio decode stale ready expectedSessionId echo:" "$log" \
         && /usr/bin/grep -Eq "audio decode stub: .*status=" "$log" \
+        && /usr/bin/grep -q "audio decode consume:" "$log" \
+        && /usr/bin/grep -q "audio queue state:" "$log" \
+        && /usr/bin/grep -q "audio queue drained:" "$log" \
+        && /usr/bin/grep -q "audio queue drift update:" "$log" \
         && /usr/bin/grep -Eq "audio decode state: .*status=" "$log" \
+        && /usr/bin/grep -q "audio decode state expectedSessionId echo:" "$log" \
+        && /usr/bin/grep -q "audio decode stale state expectedSessionId echo:" "$log" \
         && /usr/bin/grep -q "audio decode batch: count=" "$log" \
         && /usr/bin/grep -Eq "audio decode reset: .*status=" "$log" \
         && /usr/bin/grep -q "Audio diag/scaffold smoke done" "$log" \
         && ! /usr/bin/grep -q "Audio diag/scaffold smoke failed:" "$log"; then
         echo "[PASS] $name"
-        /usr/bin/grep -n "audio diag: packets=\|audio scaffold: supported=\|audio decode session start:\|audio decode ready check:\|audio decode stale ready check:\|audio decode stub:\|audio decode state:\|audio decode batch: count=\|audio decode reset:\|Audio diag/scaffold smoke done" "$log" | /usr/bin/tail -n 10
+        /usr/bin/grep -n "audio diag: packets=\|audio decode capabilities:\|audio decode capabilities post-decode:\|audio scaffold: supported=\|audio decode session start:\|audio decode ready check:\|audio decode ready expectedSessionId echo:\|audio decode stale ready check:\|audio decode stale ready expectedSessionId echo:\|audio decode stub:\|audio decode consume:\|audio queue state:\|audio queue drained:\|audio queue drift update:\|audio decode state:\|audio decode state expectedSessionId echo:\|audio decode stale state expectedSessionId echo:\|audio decode batch: count=\|audio decode reset:\|Audio diag/scaffold smoke done" "$log" | /usr/bin/tail -n 12
         PASS_COUNT=$((PASS_COUNT + 1))
       else
         echo "[FAIL] $name (expected audio diagnostics/scaffold markers missing)"
-        /usr/bin/grep -n "audio diag: packets=\|audio scaffold: supported=\|audio decode session start:\|audio decode ready check:\|audio decode stale ready check:\|audio decode stub:\|audio decode state:\|audio decode batch: count=\|audio decode reset:\|Audio diag/scaffold smoke failed:\|Audio diag/scaffold smoke done" "$log" || true
+        /usr/bin/grep -n "audio diag: packets=\|audio decode capabilities:\|audio decode capabilities post-decode:\|audio scaffold: supported=\|audio decode session start:\|audio decode ready check:\|audio decode ready expectedSessionId echo:\|audio decode stale ready check:\|audio decode stale ready expectedSessionId echo:\|audio decode stub:\|audio decode consume:\|audio queue state:\|audio queue drained:\|audio queue drift update:\|audio decode state:\|audio decode state expectedSessionId echo:\|audio decode stale state expectedSessionId echo:\|audio decode batch: count=\|audio decode reset:\|Audio diag/scaffold smoke failed:\|Audio diag/scaffold smoke done" "$log" || true
         FAIL_COUNT=$((FAIL_COUNT + 1))
       fi
       ;;

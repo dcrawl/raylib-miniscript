@@ -825,13 +825,19 @@
 |GetVideoBackend |**video** |Get active backend name as string: `desktop` or `web` |
 |GetVideoLastError |**video**=null |Get last diagnostic error string (per-player decode/runtime error when video is provided; otherwise returns last load error) |
 |GetVideoAudioDecodeStatuses | |Get canonical decode-path status constants map (`ok`, `ready`, `decodeNotWired`, `notReady`, `unsupportedCodec`, `endOfStream`, `readFailed`, `sessionMismatch`, `webBackend`) for script-side comparisons |
+|GetVideoAudioDecodeCapabilities |**video** |Get decode/playback wiring capability snapshot (`backend`, `codec`, `decodePath`, `decodeScaffoldSupported`, `readyForDecode`, `decoderWired`, `playbackWired`, `avSyncWired`, progress metrics like `decodedPcmFramesAvailable`/`decodedPcmFramesTotal`/`decodedPcmFramesConsumed`, support flags, `status`, `message`) |
 |GetVideoAudioIndexDiagnostics |**video** |Get audio packet index diagnostics map: hasAudio, packetCount, firstPacketTime, lastPacketTime, packetSpan, minDelta, maxDelta, avgDelta, nonMonotonicCount, isMonotonic |
 |StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1, **expectedSessionId**=0 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map (`status`, `message`, `decodeSessionId`, `supported`, `readCount`, `totalReadPackets`, `totalReadBytes`, Vorbis header readiness, and decode-gating summary like `readyForDecode`, `vorbisHeaderSource`, `vorbisMissingHeaders`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` with `readCount=0` |
-|DecodeVideoAudioPacket |**video**, **expectedSessionId**=0 |Desktop no-playback decode-call stub: consumes one ready audio packet and returns structured status/result map (`status`, `message`, `decodeSessionId`, `consumedPacket`, `packetIndex`, `packetPts`, `packetBytes`, `readyForDecode`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` without consuming |
+|DecodeVideoAudioPacket |**video**, **expectedSessionId**=0 |Desktop no-playback decode-call stub: consumes one ready audio packet and returns structured status/result map (`status`, `message`, `decodeSessionId`, `consumedPacket`, `packetIndex`, `packetPts`, `packetBytes`, `decodedSamples`, `decodedChannels`, `decodedSampleRate`, `readyForDecode`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` without consuming |
 |DecodeVideoAudioPacketBatch |**video**, **maxPackets**=4, **expectedSessionId**=0 |Desktop no-playback batch decode-call stub: returns a list of per-item result maps using the same schema as `DecodeVideoAudioPacket`, consuming up to maxPackets ready packets; when expectedSessionId > 0 and stale, returns one `session-mismatch` item without consuming |
-|GetVideoAudioDecodeState |**video** |Get current audio decode-session state map (`status`, `message`, `supported`, `readyForDecode`, `decodeSessionId`, `nextPacketIndex`, `totalReadPackets`, `totalReadBytes`, `remainingPackets`, plus Vorbis header/source diagnostics) |
+|GetVideoAudioDecodeState |**video**, **expectedSessionId**=0 |Get current audio decode-session state map (`status`, `message`, `supported`, `readyForDecode`, `decodeSessionId`, `expectedSessionId`, `isCurrentSession`, `nextPacketIndex`, `totalReadPackets`, `totalReadBytes`, `remainingPackets`, plus Vorbis header/source diagnostics); when expectedSessionId is stale, returns `status=session-mismatch` |
 |CreateVideoAudioDecodeSession |**video** |Create a lightweight decode-session snapshot for session-safe scripting: returns `decodeSessionId` plus readiness/status fields (`status`, `message`, `supported`, `readyForDecode`, `nextPacketIndex`, `remainingPackets`) without consuming packets |
 |IsVideoAudioDecodeReady |**video**, **expectedSessionId**=0 |Compact hot-loop readiness helper: returns (`status`, `message`, `decodeSessionId`, `expectedSessionId`, `isCurrentSession`, `supported`, `readyForDecode`) without full decode-state payload |
+|ConsumeVideoDecodedPcmFrames |**video**, **maxFrames**=0 |Consume decoded PCM-frame placeholders from the decode queue bridge (desktop-only): returns (`status`, `message`, `decodeSessionId`, `requestedFrames`, `consumedFrames`, `decodedPcmFramesAvailable`, `decodedPcmFramesConsumed`) where `maxFrames=0` consumes all currently available |
+|GetVideoAudioQueueState |**video** |Get compact decoded-audio queue telemetry (`availableFrames`, `consumedFrames`, `totalDecodedFrames`, `clockEstimatedFrames`, `clockConsumedFrames`, `clockDriftFrames`, `clockDriftMs`, `autoRefillTriggerCount`, `autoRefillPacketsDecoded`, `autoRefillTargetHitCount`, `autoRefillLastLatencyMs`, `autoRefillTargetLatencyMs`, `refillPacketsPerTrigger`, `refillLatencyGainMs`, `refillTargetHitRate`, `estimatedBufferingMarginMs`, `tuningHint`, `suggestedAdjustmentMs`, `decodedVorbisPackets`, `sampleRate`, `channels`, `latencyMs`, `syncMode`, `audioLedSyncEnabled`, `audioSyncClampWindowMs`, `audioSyncOffsetSec`, `audioClockSec`, `audioLedTargetSec`, `status`, `message`) for drift/debug/tuning |
+|SetVideoAudioSyncTuning |**video**, **enabled**=1, **clampWindowMs**=120 |Configure audio-led sync mode and clamp window (ms) used by desktop playback; returns (`audioLedSyncEnabled`, `audioSyncClampWindowMs`, `status`, `message`) |
+|GetVideoAudioSyncTuning |**video** |Get current audio-led sync tuning snapshot (`syncMode`, `audioLedSyncEnabled`, `audioSyncClampWindowMs`, `audioSyncOffsetSec`, `audioClockSec`, `audioLedTargetSec`, `status`, `message`) |
+|GetVideoFrameTimingDiagnostics |**video** |Get video frame scheduling/sync diagnostics: `syncMode` (`"wall-clock"` or `"audio-stream"`), `videoAudioSyncSkewMs` (video ahead of audio-consumed clock in ms; negative = video behind), `totalFramesDecoded` (cumulative VP8 decode calls), `totalFramesSkipped` (stale frames fast-forwarded without decoding during catch-up), `totalFrameDropEvents` (decode-budget exhaustion events), `lastDecodeBudgetUsed` (frames decoded in last UpdateVideoStream tick), `lastDecodeBudgetExhausted` (1 if budget hit with pending frames), `lastDecodedFramePts` (PTS of most recently decoded frame), `lastUpdateTargetPts` (targetTime from last UpdateVideoStream), plus audio-led sync fields (`audioLedSyncEnabled`, `audioSyncClampWindowMs`, `audioSyncOffsetSec`, `audioClockSec`, `audioLedTargetSec`), and `framesBuffered` (encoded frames remaining in index) |
 |ResetVideoAudioDecodeSession |**video**, **keepSeededHeaders**=1 |Reset decode-session counters/index to start of audio packet stream and return updated decode-state map (`status`, `message`, decode counters/readiness fields); when keepSeededHeaders=1, preserves seeded Vorbis readiness from `CodecPrivate` |
 |SetVideoLooping |**video**, **enabled**=1 |Enable/disable video looping |
 |GetVideoLooping |**video** |Get current looping mode (1/0) |
@@ -846,16 +852,32 @@ Notes:
 - On web builds, audio playback is driven by the browser video element; the same MiniScript API is used.
 - Desktop decodes VP8 from IVF and WebM containers; unsupported/invalid WebM block layouts are reported through runtime warnings.
 - `GetVideoAudioDecodeStatuses` returns the canonical status strings for decode-path APIs, so scripts can compare against constants instead of hardcoding string literals.
+- `GetVideoAudioDecodeCapabilities` provides an explicit wiring snapshot for rollout-safe scripts: desktop reports `decoderWired=1` for Vorbis packet decode internals, and reports `playbackWired`/`avSyncWired` as `1` when the desktop AudioStream playback path is active (`0` only on builds without Vorbis/audio-stream wiring).
+- `GetVideoAudioDecodeCapabilities.decodedPcmFramesAvailable` is a lightweight placeholder progress metric that accumulates decoded-frame availability before audio output buffering/playback is connected.
+- `ConsumeVideoDecodedPcmFrames` is a pre-playback bridge helper for queue-flow validation: it consumes from the placeholder decoded-frame counter and tracks cumulative consumption (`decodedPcmFramesConsumed`) before real audio-device output is wired.
+- `UpdateVideoStream` now advances placeholder decoded-audio queue consumption from media-clock progression (`timePlayed` delta × sampleRate) and applies a simple auto-refill policy (low/high watermark) to re-decode packets when queue latency falls too low, simulating end-to-end decode+drain stabilization before audio-device output integration.
+- `GetVideoAudioQueueState` is a compact queue-depth helper for debug tooling and scripts; `latencyMs` is estimated as `availableFrames / sampleRate * 1000`.
+- `GetVideoAudioQueueState` now includes explicit media-clock drain telemetry: `clockEstimatedFrames` (frames requested by playback clock), `clockConsumedFrames` (frames actually drained from queue by playback clock), `clockDriftFrames` (estimate minus actual), and `clockDriftMs` (frame drift translated by sample rate).
+- `GetVideoAudioQueueState` also includes auto-refill telemetry to verify queue stabilization behavior in `UpdateVideoStream`: `autoRefillTriggerCount`, `autoRefillPacketsDecoded`, `autoRefillLastLatencyMs`, and `autoRefillTargetLatencyMs`.
+- For watermark tuning, `GetVideoAudioQueueState` exposes compact refill-efficiency metrics: `refillPacketsPerTrigger` (average decoded packets per refill trigger), `refillLatencyGainMs` (average queue-latency gain in ms per refill trigger), and bounded `refillTargetHitRate` (in [0,1], fraction of refill triggers that reached target latency).
+- `GetVideoAudioQueueState` also includes `estimatedBufferingMarginMs` = `latencyMs - autoRefillTargetLatencyMs` to show how much buffer headroom remains above the watermark target; positive margin indicates healthy buffering ahead of refill threshold, negative margin indicates buffer is below target (underrun risk).
+- `GetVideoAudioQueueState` includes watermark tuning hints (`tuningHint`, `suggestedAdjustmentMs`) that analyze `refillTargetHitRate` across ≥5 refill triggers: `tuningHint` is one of `"insufficient-data"` (< 5 triggers), `"increase-target"` (hit rate ≥ 0.9, target too conservative), `"optimal"` (0.5-0.9 hit rate), or `"decrease-target"` (hit rate < 0.5, target too aggressive); `suggestedAdjustmentMs` recommends the adjustment amount (positive to increase target, negative to decrease) based on refill gain and current buffering margin.
+- `SetVideoAudioSyncTuning` and `GetVideoAudioSyncTuning` provide script-level control/inspection for audio-led sync. `enabled=1` lets the video target follow the audio stream clock; `clampWindowMs` bounds correction against the wall-clock predictor to avoid large jumps during catch-up.
+- `GetVideoFrameTimingDiagnostics` exposes the frame-scheduling health of the desktop VP8 player: `totalFramesSkipped` counts frames fast-forwarded without VP8-decoding during catch-up (stale PTS > one frame-interval behind target), `totalFrameDropEvents` counts times the decode budget (8 frames/tick) was saturated with frames still pending, and `videoAudioSyncSkewMs` tracks drift between the video presentation clock and the audio-consumed position (positive = video ahead of audio, negative = video behind). `syncMode` is `"wall-clock"` by default and switches to `"audio-stream"` while desktop AudioStream playback is actively driving target-time selection.
 - `StepVideoAudioDecodeScaffold` is intentionally a scaffolding API: it only reads encoded audio packets (no audio playback/sync yet) and reports Vorbis header readiness (`vorbisHeaderParseAttempted`, `vorbisIdentificationSeen`, `vorbisCommentSeen`, `vorbisSetupSeen`, `vorbisHeadersReady`) sourced from packet scans and Matroska `CodecPrivate` parsing, plus decode gating (`readyForDecode`) and source/missing-header diagnostics (`vorbisHeaderSource`, `vorbisMissingHeaders`).
 - `StepVideoAudioDecodeScaffold` accepts an optional `expectedSessionId` guard; if it does not match current `decodeSessionId`, it returns `session-mismatch` and does not read packets.
 - `StepVideoAudioDecodeScaffold` now always includes `status`/`message` for consistent decode-path handling (`ok`, `end-of-stream`, `unsupported-codec`, `read-failed`, `session-mismatch`).
-- `DecodeVideoAudioPacket` is currently a stable stub contract for future decoder integration: when ready, it consumes exactly one packet and returns `status="decode-not-wired"` until real decode internals are connected.
+- `DecodeVideoAudioPacket` now performs real Vorbis decoding via libvorbis when the library is available and the decoder was initialized from CodecPrivate headers; in that case `status="ok"` and `decodedSamples` reflects the actual PCM frame count. When libvorbis is not compiled in, it falls back to PTS-delta sample estimation and returns `status="decode-not-wired"`.
 - `DecodeVideoAudioPacketBatch` preserves the same per-item schema as `DecodeVideoAudioPacket`, so future real decode internals can scale from single to batched execution without script API redesign.
 - `DecodeVideoAudioPacket` and `DecodeVideoAudioPacketBatch` accept an optional `expectedSessionId` guard; if it does not match current `decodeSessionId`, they return `session-mismatch` and do not consume packets.
 - `GetVideoAudioDecodeState` is the stable session/progress query API for scripting against decode lifecycle states (`ready`, `not-ready`, `unsupported-codec`, `end-of-stream`, `web-backend`) without depending on internal decoder implementation details.
+- `GetVideoAudioDecodeState` also accepts optional `expectedSessionId` and echoes it (`expectedSessionId`) with `isCurrentSession` for cheap stale-session checks without issuing decode calls.
+- Smoke runner enforcement markers for decode-state echo checks are `audio decode state expectedSessionId echo:` (current session) and `audio decode stale state expectedSessionId echo:` (stale session).
 - `GetVideoAudioDecodeState` and `ResetVideoAudioDecodeSession` now include a `message` field so scripts can log human-readable state transitions without custom mapping tables.
 - `CreateVideoAudioDecodeSession` is a tiny one-call session bootstrap API for scripts: read `decodeSessionId` and initial readiness/status before issuing guarded decode-path calls.
 - `IsVideoAudioDecodeReady` is intended for tight loops that only need a compact readiness/session check (`isCurrentSession`, `readyForDecode`) and not the full decode-state map.
+- `IsVideoAudioDecodeReady` echoes the provided `expectedSessionId` in its result map (both current and stale paths), so scripts can assert input/output session consistency.
+- Smoke runner enforcement markers for this echo contract are `audio decode ready expectedSessionId echo:` (current session) and `audio decode stale ready expectedSessionId echo:` (stale session).
 - Recommended session-safe flow: call `CreateVideoAudioDecodeSession` once, then pass `session.decodeSessionId` into `StepVideoAudioDecodeScaffold`, `DecodeVideoAudioPacket`, and `DecodeVideoAudioPacketBatch` as `expectedSessionId`.
 - `decodeSessionId` is a monotonically increasing decode-session marker: `ResetVideoAudioDecodeSession` advances it so scripts can detect resets/restarts directly.
 - `ResetVideoAudioDecodeSession` provides deterministic replay of audio decode scaffolding by clearing consumed counters/index and optionally retaining seeded Vorbis readiness (`keepSeededHeaders=1` by default).
@@ -866,7 +888,7 @@ Decode status/message reference:
 |-----|---------|-----------------|
 |`ok` | Scaffold step completed and read attempt succeeded | `audio scaffold step completed` |
 |`ready` | Decode path is ready for packet consumption or session snapshot is ready | `decode state snapshot`, `decode session snapshot created` |
-|`decode-not-wired` | Packet was consumed by stub path; real decoder internals not connected yet | `packet consumed; decoder internals not yet wired` |
+|`decode-not-wired` | Packet was consumed by fallback estimate path; libvorbis not compiled in or decoder not initialized | `packet consumed; decoder internals not yet wired` |
 |`not-ready` | Decode path exists but required headers/readiness are incomplete | `audio headers are incomplete; decoder not ready` |
 |`unsupported-codec` | Codec exists but no scaffold/decode path is implemented | `audio decode path is not scaffolded for this codec` |
 |`end-of-stream` | No more packets remain to read/consume | `no more audio packets to read`, `no more audio packets to consume` |
@@ -938,9 +960,9 @@ while true
 		break
 	end if
 
-	# Today this returns decode-not-wired after consuming one packet.
-	if decode.status == "decode-not-wired" then
-		print "consumed packet=" + str(decode.packetIndex)
+	# Returns ok when decoded via libvorbis, decode-not-wired on estimate fallback.
+	if decode.status == "ok" or decode.status == "decode-not-wired" then
+		print "consumed packet=" + str(decode.packetIndex) + " samples=" + str(decode.decodedSamples)
 	end if
 end while
 
@@ -994,8 +1016,8 @@ while true
 		break
 	end if
 
-	# Today items return decode-not-wired after packet consumption.
-	if first.status == "decode-not-wired" then
+	# Returns ok when decoded via libvorbis, decode-not-wired on estimate fallback.
+	if first.status == "ok" or first.status == "decode-not-wired" then
 		print "batch consumed=" + str(len(batch)) + " firstPacket=" + str(first.packetIndex)
 	end if
 end while

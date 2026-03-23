@@ -174,6 +174,22 @@ else()
         endif()
     endif()
 
+    option(ENABLE_VORBIS_AUDIO "Enable Vorbis audio decoding with libvorbis" ON)
+    if(ENABLE_VORBIS_AUDIO)
+        find_path(VORBIS_INCLUDE_DIR vorbis/codec.h)
+        find_library(VORBIS_LIBRARY NAMES vorbis)
+        find_path(OGG_INCLUDE_DIR ogg/ogg.h)
+        find_library(OGG_LIBRARY NAMES ogg)
+        if(VORBIS_INCLUDE_DIR AND VORBIS_LIBRARY AND OGG_INCLUDE_DIR AND OGG_LIBRARY)
+            target_include_directories(raylib-miniscript PRIVATE ${VORBIS_INCLUDE_DIR} ${OGG_INCLUDE_DIR})
+            target_link_libraries(raylib-miniscript ${VORBIS_LIBRARY} ${OGG_LIBRARY})
+            target_compile_definitions(raylib-miniscript PRIVATE HAVE_LIBVORBIS=1)
+            message(STATUS "Vorbis audio decoding enabled: ${VORBIS_LIBRARY}")
+        else()
+            message(WARNING "libvorbis/libogg not found; Vorbis audio decoding will remain stubbed")
+        endif()
+    endif()
+
     # Platform-specific libraries
     if(APPLE)
         target_link_libraries(raylib-miniscript
