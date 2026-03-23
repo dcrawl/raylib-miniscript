@@ -91,6 +91,7 @@ queueAfter = null
 queueDrained = null
 syncTuneBefore = null
 syncTuneAfter = null
+syncTuneAdaptive = null
 driftStartConsumed = 0
 if step == null then
 	print "Audio diag/scaffold smoke failed: scaffold result is null"
@@ -363,7 +364,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if queueBefore.syncMode == null or queueBefore.audioLedSyncEnabled == null or queueBefore.audioSyncClampWindowMs == null or queueBefore.audioSyncOffsetSec == null or queueBefore.audioClockSec == null or queueBefore.audioLedTargetSec == null then
+	if queueBefore.syncMode == null or queueBefore.audioLedSyncEnabled == null or queueBefore.audioSyncClampWindowMs == null or queueBefore.audioSyncOffsetSec == null or queueBefore.audioClockSec == null or queueBefore.audioLedTargetSec == null or queueBefore.audioSyncClampRawWindowMs == null or queueBefore.audioSyncClampSmoothingAlpha == null or queueBefore.audioSyncClampMaxStepMs == null then
 		print "Audio diag/scaffold smoke failed: queue telemetry helper missing audio sync tuning fields"
 		rl.UnloadVideoStream video
 		exit 1
@@ -385,7 +386,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if syncTuneBefore.audioLedSyncEnabled == null or syncTuneBefore.audioSyncClampWindowMs == null then
+	if syncTuneBefore.audioLedSyncEnabled == null or syncTuneBefore.audioSyncClampWindowMs == null or syncTuneBefore.audioSyncClampAdaptive == null or syncTuneBefore.audioSyncClampRawWindowMs == null or syncTuneBefore.audioSyncClampSmoothingAlpha == null or syncTuneBefore.audioSyncClampMaxStepMs == null then
 		print "Audio diag/scaffold smoke failed: GetVideoAudioSyncTuning missing fields"
 		rl.UnloadVideoStream video
 		exit 1
@@ -403,8 +404,41 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+	if syncTuneAfter.audioSyncClampAdaptive != 0 then
+		print "Audio diag/scaffold smoke failed: expected manual clamp mode after setting clampWindowMs=35"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 	if syncTuneAfter.audioSyncClampWindowMs != 35 then
 		print "Audio diag/scaffold smoke failed: expected audioSyncClampWindowMs=35 after tuning"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if syncTuneAfter.audioSyncClampRawWindowMs != 35 then
+		print "Audio diag/scaffold smoke failed: expected audioSyncClampRawWindowMs=35 after manual tuning"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+
+	tuneSetOptional = rl.SetVideoAudioSyncTuning(video, 1, 35, 0.5, 8)
+	if tuneSetOptional == null or tuneSetOptional.status != statusCodes.ok then
+		print "Audio diag/scaffold smoke failed: SetVideoAudioSyncTuning optional args form failed"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	syncTuneOptional = rl.GetVideoAudioSyncTuning(video)
+	if syncTuneOptional == null then
+		print "Audio diag/scaffold smoke failed: GetVideoAudioSyncTuning null after optional args"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if abs(syncTuneOptional.audioSyncClampSmoothingAlpha - 0.5) > 0.0001 then
+		print "Audio diag/scaffold smoke failed: optional args did not apply smoothingAlpha"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if abs(syncTuneOptional.audioSyncClampMaxStepMs - 8) > 0.0001 then
+		print "Audio diag/scaffold smoke failed: optional args did not apply maxStepMs"
 		rl.UnloadVideoStream video
 		exit 1
 	end if
@@ -511,6 +545,58 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 	end if
 	if queueAfter.audioSyncClampWindowMs != 35 then
 		print "Audio diag/scaffold smoke failed: queue telemetry did not reflect configured clamp window"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+
+	tuneAdaptive = rl.SetVideoAudioSyncTuning(video, 1, 0)
+	if tuneAdaptive == null or tuneAdaptive.status != statusCodes.ok or tuneAdaptive.audioSyncClampAdaptive != 1 then
+		print "Audio diag/scaffold smoke failed: adaptive clamp re-enable via SetVideoAudioSyncTuning failed"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	syncTuneAdaptive = rl.GetVideoAudioSyncTuning(video)
+	if syncTuneAdaptive == null or syncTuneAdaptive.audioSyncClampAdaptive != 1 then
+		print "Audio diag/scaffold smoke failed: adaptive clamp state not reflected in GetVideoAudioSyncTuning"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if syncTuneAdaptive.audioSyncClampWindowMs <= 0 then
+		print "Audio diag/scaffold smoke failed: adaptive clamp window should stay positive"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if syncTuneAdaptive.audioSyncClampRawWindowMs <= 0 then
+		print "Audio diag/scaffold smoke failed: adaptive raw clamp window should stay positive"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+
+	tuneMap = {"enabled":1, "clampWindowMs":0, "smoothingAlpha":0.35, "maxStepMs":9}
+	tuneSetMap = rl.SetVideoAudioSyncTuning(video, 1, tuneMap)
+	if tuneSetMap == null or tuneSetMap.status != statusCodes.ok then
+		print "Audio diag/scaffold smoke failed: SetVideoAudioSyncTuning map form failed"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	syncTuneMap = rl.GetVideoAudioSyncTuning(video)
+	if syncTuneMap == null then
+		print "Audio diag/scaffold smoke failed: GetVideoAudioSyncTuning null after map form"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if syncTuneMap.audioSyncClampAdaptive != 1 then
+		print "Audio diag/scaffold smoke failed: map form did not re-enable adaptive clamp"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if abs(syncTuneMap.audioSyncClampSmoothingAlpha - 0.35) > 0.0001 then
+		print "Audio diag/scaffold smoke failed: map form did not apply smoothingAlpha"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if abs(syncTuneMap.audioSyncClampMaxStepMs - 9) > 0.0001 then
+		print "Audio diag/scaffold smoke failed: map form did not apply maxStepMs"
 		rl.UnloadVideoStream video
 		exit 1
 	end if

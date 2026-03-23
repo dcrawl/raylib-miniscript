@@ -40,20 +40,20 @@ run_case() {
 
   case "$name" in
     vp8_smoke)
-      if /usr/bin/grep -q "VP8 smoke timeout reached\|VP8 smoke failed:" "$log"; then
+      if /usr/bin/grep -q "CI VP8 smoke timeout reached\|CI VP8 smoke failed:" "$log"; then
         echo "[FAIL] $name (timeout/failure marker found)"
-        /usr/bin/grep -n "VP8 smoke timeout reached\|VP8 smoke failed:\|VP8 smoke done:" "$log" || true
+        /usr/bin/grep -n "CI VP8 smoke timeout reached\|CI VP8 smoke failed:\|CI VP8 smoke done:" "$log" || true
         FAIL_COUNT=$((FAIL_COUNT + 1))
         return
       fi
       if /usr/bin/grep -q "DidVideoFinish fired" "$log" \
-        && /usr/bin/grep -Eq "VP8 smoke done: finish=[1-9]" "$log"; then
+        && /usr/bin/grep -Eq "CI VP8 smoke done: finish=[1-9]" "$log"; then
         echo "[PASS] $name"
-        /usr/bin/grep -n "video backend=\|DidVideoFinish fired\|VP8 smoke done:" "$log" | /usr/bin/tail -n 10
+        /usr/bin/grep -n "ci smoke backend=\|DidVideoFinish fired\|CI VP8 smoke done:" "$log" | /usr/bin/tail -n 10
         PASS_COUNT=$((PASS_COUNT + 1))
       else
         echo "[FAIL] $name (expected finish markers missing)"
-        /usr/bin/grep -n "video backend=\|DidVideoFinish fired\|VP8 smoke done:" "$log" || true
+        /usr/bin/grep -n "ci smoke backend=\|DidVideoFinish fired\|CI VP8 smoke done:" "$log" || true
         FAIL_COUNT=$((FAIL_COUNT + 1))
       fi
       ;;
@@ -151,6 +151,19 @@ run_case() {
         FAIL_COUNT=$((FAIL_COUNT + 1))
       fi
       ;;
+    vp8_seek_audio_align_smoke)
+      if /usr/bin/grep -q "seek audio align:" "$log" \
+        && /usr/bin/grep -q "Seek audio align smoke done" "$log" \
+        && ! /usr/bin/grep -q "Seek audio align smoke failed:" "$log"; then
+        echo "[PASS] $name"
+        /usr/bin/grep -n "seek audio align:\|Seek audio align smoke done" "$log" | /usr/bin/tail -n 10
+        PASS_COUNT=$((PASS_COUNT + 1))
+      else
+        echo "[FAIL] $name (expected seek-audio markers missing)"
+        /usr/bin/grep -n "seek audio align:\|Seek audio align smoke failed:\|Seek audio align smoke done" "$log" || true
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+      fi
+      ;;
     *)
       echo "[FAIL] unknown smoke case: $name"
       FAIL_COUNT=$((FAIL_COUNT + 1))
@@ -158,13 +171,14 @@ run_case() {
   esac
 }
 
-run_case "vp8_smoke" "$ROOT_DIR/assets/vp8_smoke.ms"
+run_case "vp8_smoke" "$ROOT_DIR/assets/vp8_ci_finish_smoke.ms"
 run_case "vp8_loop_smoke" "$ROOT_DIR/assets/vp8_loop_smoke.ms"
 run_case "vp8_finish_smoke" "$ROOT_DIR/assets/vp8_finish_smoke.ms"
 run_case "vp8_error_smoke" "$ROOT_DIR/assets/vp8_error_smoke.ms"
 run_case "vp8_audio_meta_smoke" "$ROOT_DIR/assets/vp8_audio_meta_smoke.ms"
 run_case "vp8_audio_packet_index_smoke" "$ROOT_DIR/assets/vp8_audio_packet_index_smoke.ms"
 run_case "vp8_audio_diag_scaffold_smoke" "$ROOT_DIR/assets/vp8_audio_diag_scaffold_smoke.ms"
+run_case "vp8_seek_audio_align_smoke" "$ROOT_DIR/assets/vp8_seek_audio_align_smoke.ms"
 
 echo "[SUMMARY] pass=$PASS_COUNT fail=$FAIL_COUNT"
 if [[ $FAIL_COUNT -ne 0 ]]; then
