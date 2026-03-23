@@ -824,6 +824,7 @@
 |GetVideoMetadata |**video** |Alias of GetVideoInfo |
 |GetVideoBackend |**video** |Get active backend name as string: `desktop` or `web` |
 |GetVideoLastError |**video**=null |Get last diagnostic error string (per-player decode/runtime error when video is provided; otherwise returns last load error) |
+|GetVideoAudioDecodeStatuses | |Get canonical decode-path status constants map (`ok`, `ready`, `decodeNotWired`, `notReady`, `unsupportedCodec`, `endOfStream`, `readFailed`, `sessionMismatch`, `webBackend`) for script-side comparisons |
 |GetVideoAudioIndexDiagnostics |**video** |Get audio packet index diagnostics map: hasAudio, packetCount, firstPacketTime, lastPacketTime, packetSpan, minDelta, maxDelta, avgDelta, nonMonotonicCount, isMonotonic |
 |StepVideoAudioDecodeScaffold |**video**, **maxPackets**=1, **expectedSessionId**=0 |Desktop-only read path scaffold for first supported audio codec (`A_VORBIS`); reads up to maxPackets encoded packets and returns progress/status map (`status`, `message`, `decodeSessionId`, `supported`, `readCount`, `totalReadPackets`, `totalReadBytes`, Vorbis header readiness, and decode-gating summary like `readyForDecode`, `vorbisHeaderSource`, `vorbisMissingHeaders`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` with `readCount=0` |
 |DecodeVideoAudioPacket |**video**, **expectedSessionId**=0 |Desktop no-playback decode-call stub: consumes one ready audio packet and returns structured status/result map (`status`, `message`, `decodeSessionId`, `consumedPacket`, `packetIndex`, `packetPts`, `packetBytes`, `readyForDecode`); when expectedSessionId > 0 and stale, returns `status=session-mismatch` without consuming |
@@ -843,6 +844,7 @@ Notes:
 - Keep calling `UpdateVideoStream` in your loop; video decode/upload is incremental and does not halt MiniScript execution.
 - On web builds, audio playback is driven by the browser video element; the same MiniScript API is used.
 - Desktop decodes VP8 from IVF and WebM containers; unsupported/invalid WebM block layouts are reported through runtime warnings.
+- `GetVideoAudioDecodeStatuses` returns the canonical status strings for decode-path APIs, so scripts can compare against constants instead of hardcoding string literals.
 - `StepVideoAudioDecodeScaffold` is intentionally a scaffolding API: it only reads encoded audio packets (no audio playback/sync yet) and reports Vorbis header readiness (`vorbisHeaderParseAttempted`, `vorbisIdentificationSeen`, `vorbisCommentSeen`, `vorbisSetupSeen`, `vorbisHeadersReady`) sourced from packet scans and Matroska `CodecPrivate` parsing, plus decode gating (`readyForDecode`) and source/missing-header diagnostics (`vorbisHeaderSource`, `vorbisMissingHeaders`).
 - `StepVideoAudioDecodeScaffold` accepts an optional `expectedSessionId` guard; if it does not match current `decodeSessionId`, it returns `session-mismatch` and does not read packets.
 - `StepVideoAudioDecodeScaffold` now always includes `status`/`message` for consistent decode-path handling (`ok`, `end-of-stream`, `unsupported-codec`, `read-failed`, `session-mismatch`).
@@ -855,6 +857,20 @@ Notes:
 - Recommended session-safe flow: call `CreateVideoAudioDecodeSession` once, then pass `session.decodeSessionId` into `StepVideoAudioDecodeScaffold`, `DecodeVideoAudioPacket`, and `DecodeVideoAudioPacketBatch` as `expectedSessionId`.
 - `decodeSessionId` is a monotonically increasing decode-session marker: `ResetVideoAudioDecodeSession` advances it so scripts can detect resets/restarts directly.
 - `ResetVideoAudioDecodeSession` provides deterministic replay of audio decode scaffolding by clearing consumed counters/index and optionally retaining seeded Vorbis readiness (`keepSeededHeaders=1` by default).
+
+Decode status/message reference:
+
+|Status | Meaning | Typical message |
+|-----|---------|-----------------|
+|`ok` | Scaffold step completed and read attempt succeeded | `audio scaffold step completed` |
+|`ready` | Decode path is ready for packet consumption or session snapshot is ready | `decode state snapshot`, `decode session snapshot created` |
+|`decode-not-wired` | Packet was consumed by stub path; real decoder internals not connected yet | `packet consumed; decoder internals not yet wired` |
+|`not-ready` | Decode path exists but required headers/readiness are incomplete | `audio headers are incomplete; decoder not ready` |
+|`unsupported-codec` | Codec exists but no scaffold/decode path is implemented | `audio decode path is not scaffolded for this codec` |
+|`end-of-stream` | No more packets remain to read/consume | `no more audio packets to read`, `no more audio packets to consume` |
+|`read-failed` | Underlying packet read failed | `failed to read audio packet from stream` |
+|`session-mismatch` | Provided `expectedSessionId` is stale vs current `decodeSessionId` | `stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession` |
+|`web-backend` | API is desktop-only and current player/backend is web | `audio decode stub is desktop-only`, `audio decode helper is desktop-only`, `audio decode state is desktop-only`, `audio decode reset is desktop-only` |
 
 MiniScript helper example (standard load + diagnostics):
 

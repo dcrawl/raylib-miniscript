@@ -11,6 +11,18 @@ end if
 
 meta = rl.GetVideoInfo(video)
 diag = rl.GetVideoAudioIndexDiagnostics(video)
+statusCodes = rl.GetVideoAudioDecodeStatuses()
+
+if statusCodes == null then
+	print "Audio diag/scaffold smoke failed: decode status constants map is null"
+	rl.UnloadVideoStream video
+	exit 1
+end if
+if statusCodes.decodeNotWired == null or statusCodes.sessionMismatch == null or statusCodes.ok == null then
+	print "Audio diag/scaffold smoke failed: decode status constants missing keys"
+	rl.UnloadVideoStream video
+	exit 1
+end if
 
 if diag == null then
 	print "Audio diag/scaffold smoke failed: diagnostics map is null"
@@ -99,7 +111,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if step.status != "ok" then
+	if step.status != statusCodes.ok then
 		print "Audio diag/scaffold smoke failed: expected scaffold status=ok"
 		rl.UnloadVideoStream video
 		exit 1
@@ -153,7 +165,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if decodeStub.status != "decode-not-wired" then
+	if decodeStub.status != statusCodes.decodeNotWired then
 		print "Audio diag/scaffold smoke failed: decode stub expected decode-not-wired status"
 		rl.UnloadVideoStream video
 		exit 1
@@ -233,7 +245,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if firstItem.status != "decode-not-wired" then
+	if firstItem.status != statusCodes.decodeNotWired then
 		print "Audio diag/scaffold smoke failed: decode batch first item expected decode-not-wired"
 		rl.UnloadVideoStream video
 		exit 1
@@ -287,7 +299,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if staleDecode.status != "session-mismatch" then
+	if staleDecode.status != statusCodes.sessionMismatch then
 		print "Audio diag/scaffold smoke failed: stale decode expected session-mismatch status"
 		rl.UnloadVideoStream video
 		exit 1
@@ -309,7 +321,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if staleBatch[0].status != "session-mismatch" then
+	if staleBatch[0].status != statusCodes.sessionMismatch then
 		print "Audio diag/scaffold smoke failed: stale batch expected session-mismatch"
 		rl.UnloadVideoStream video
 		exit 1
@@ -326,7 +338,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
-	if staleStep.status != "session-mismatch" then
+	if staleStep.status != statusCodes.sessionMismatch then
 		print "Audio diag/scaffold smoke failed: stale step expected session-mismatch"
 		rl.UnloadVideoStream video
 		exit 1
@@ -344,6 +356,7 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
+print "audio status constants: ok=" + statusCodes.ok + " decodeNotWired=" + statusCodes.decodeNotWired + " sessionMismatch=" + statusCodes.sessionMismatch
 print "audio scaffold: supported=" + str(step.supported) + " readCount=" + str(step.readCount) + " totalReadPackets=" + str(step.totalReadPackets) + " totalReadBytes=" + str(step.totalReadBytes)
 print "audio headers: attempted=" + str(step.vorbisHeaderParseAttempted) + " ready=" + str(step.vorbisHeadersReady) + " id=" + str(step.vorbisIdentificationSeen) + " comment=" + str(step.vorbisCommentSeen) + " setup=" + str(step.vorbisSetupSeen)
 print "audio readiness: source=" + step.vorbisHeaderSource + " missing=" + step.vorbisMissingHeaders + " readyForDecode=" + str(step.readyForDecode)

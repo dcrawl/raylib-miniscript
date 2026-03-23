@@ -1689,6 +1689,22 @@ void AddRVideoMethods(ValueDict raylibModule) {
 	raylibModule.SetValue("GetVideoLastError", i->GetFunc());
 
 	i = Intrinsic::Create("");
+	i->code = INTRINSIC_LAMBDA {
+		ValueDict info;
+		info.SetValue(String("ok"), Value(String("ok")));
+		info.SetValue(String("ready"), Value(String("ready")));
+		info.SetValue(String("decodeNotWired"), Value(String("decode-not-wired")));
+		info.SetValue(String("notReady"), Value(String("not-ready")));
+		info.SetValue(String("unsupportedCodec"), Value(String("unsupported-codec")));
+		info.SetValue(String("endOfStream"), Value(String("end-of-stream")));
+		info.SetValue(String("readFailed"), Value(String("read-failed")));
+		info.SetValue(String("sessionMismatch"), Value(String("session-mismatch")));
+		info.SetValue(String("webBackend"), Value(String("web-backend")));
+		return IntrinsicResult(Value(info));
+	};
+	raylibModule.SetValue("GetVideoAudioDecodeStatuses", i->GetFunc());
+
+	i = Intrinsic::Create("");
 	i->AddParam("video");
 	i->code = INTRINSIC_LAMBDA {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
