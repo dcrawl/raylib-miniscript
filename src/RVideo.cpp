@@ -2167,6 +2167,52 @@ void AddRVideoMethods(ValueDict raylibModule) {
 
 	i = Intrinsic::Create("");
 	i->AddParam("video");
+	i->AddParam("expectedSessionId", Value::zero);
+	i->code = INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		if (!state || !state->valid) return IntrinsicResult::Null;
+		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
+
+		ValueDict info;
+		int supported = state->audioDecodeScaffoldReady ? 1 : 0;
+		int ready = IsAudioDecodeReady(state) ? 1 : 0;
+		int sessionId = (int)state->audioDecodeSessionId;
+		int isCurrentSession = 1;
+		if (expectedSessionId > 0 && expectedSessionId != sessionId) isCurrentSession = 0;
+		info.SetValue(String("decodeSessionId"), Value(sessionId));
+		info.SetValue(String("expectedSessionId"), Value(expectedSessionId));
+		info.SetValue(String("isCurrentSession"), Value(isCurrentSession));
+		info.SetValue(String("supported"), Value(supported));
+		info.SetValue(String("readyForDecode"), Value(ready));
+
+		const char* status = "ready";
+		const char* message = "decode ready check";
+#ifdef PLATFORM_WEB
+		status = "web-backend";
+		message = "audio decode readiness helper is desktop-only";
+#else
+		if (state->webPlayer) {
+			status = "web-backend";
+			message = "audio decode readiness helper is desktop-only";
+		} else if (!isCurrentSession) {
+			status = "session-mismatch";
+			message = "stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession";
+		} else if (!supported) {
+			status = "unsupported-codec";
+			message = "audio decode path is not scaffolded for this codec";
+		} else if (!ready) {
+			status = "not-ready";
+			message = "audio headers are incomplete; decoder not ready";
+		}
+#endif
+		info.SetValue(String("status"), Value(String(status)));
+		info.SetValue(String("message"), Value(String(message)));
+		return IntrinsicResult(Value(info));
+	};
+	raylibModule.SetValue("IsVideoAudioDecodeReady", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("video");
 	i->AddParam("keepSeededHeaders", Value(1));
 	i->code = INTRINSIC_LAMBDA {
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));

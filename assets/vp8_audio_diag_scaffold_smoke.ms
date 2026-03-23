@@ -54,6 +54,8 @@ staleDecode = null
 staleBatch = null
 staleStep = null
 sessionStart = null
+readyCheck = null
+staleReadyCheck = null
 if step == null then
 	print "Audio diag/scaffold smoke failed: scaffold result is null"
 	rl.UnloadVideoStream video
@@ -135,6 +137,23 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 	end if
 	if sessionStart.status != "ready" and sessionStart.status != "end-of-stream" then
 		print "Audio diag/scaffold smoke failed: decode session helper unexpected status=" + sessionStart.status
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+
+	readyCheck = rl.IsVideoAudioDecodeReady(video, sessionStart.decodeSessionId)
+	if readyCheck == null then
+		print "Audio diag/scaffold smoke failed: readiness helper returned null"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if readyCheck.status == null or readyCheck.message == null or readyCheck.readyForDecode == null then
+		print "Audio diag/scaffold smoke failed: readiness helper missing fields"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if readyCheck.isCurrentSession != 1 then
+		print "Audio diag/scaffold smoke failed: readiness helper expected current session"
 		rl.UnloadVideoStream video
 		exit 1
 	end if
@@ -353,6 +372,23 @@ if meta.hasAudio and meta.audioCodec == "A_VORBIS" then
 		rl.UnloadVideoStream video
 		exit 1
 	end if
+
+	staleReadyCheck = rl.IsVideoAudioDecodeReady(video, decodeStub.decodeSessionId)
+	if staleReadyCheck == null then
+		print "Audio diag/scaffold smoke failed: stale readiness helper returned null"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleReadyCheck.status != statusCodes.sessionMismatch then
+		print "Audio diag/scaffold smoke failed: stale readiness helper expected session-mismatch"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
+	if staleReadyCheck.isCurrentSession != 0 then
+		print "Audio diag/scaffold smoke failed: stale readiness helper expected isCurrentSession=0"
+		rl.UnloadVideoStream video
+		exit 1
+	end if
 end if
 
 print "audio diag: packets=" + str(diag.packetCount) + " avgDelta=" + str(diag.avgDelta) + " nonMonotonic=" + str(diag.nonMonotonicCount)
@@ -383,6 +419,12 @@ if staleStep != null then
 end if
 if sessionStart != null then
 	print "audio decode session start: sessionId=" + str(sessionStart.decodeSessionId) + " status=" + sessionStart.status + " readyForDecode=" + str(sessionStart.readyForDecode)
+end if
+if readyCheck != null then
+	print "audio decode ready check: sessionId=" + str(readyCheck.decodeSessionId) + " status=" + readyCheck.status + " readyForDecode=" + str(readyCheck.readyForDecode) + " isCurrent=" + str(readyCheck.isCurrentSession)
+end if
+if staleReadyCheck != null then
+	print "audio decode stale ready check: sessionId=" + str(staleReadyCheck.decodeSessionId) + " status=" + staleReadyCheck.status + " isCurrent=" + str(staleReadyCheck.isCurrentSession)
 end if
 
 rl.UnloadVideoStream video

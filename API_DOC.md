@@ -831,6 +831,7 @@
 |DecodeVideoAudioPacketBatch |**video**, **maxPackets**=4, **expectedSessionId**=0 |Desktop no-playback batch decode-call stub: returns a list of per-item result maps using the same schema as `DecodeVideoAudioPacket`, consuming up to maxPackets ready packets; when expectedSessionId > 0 and stale, returns one `session-mismatch` item without consuming |
 |GetVideoAudioDecodeState |**video** |Get current audio decode-session state map (`status`, `message`, `supported`, `readyForDecode`, `decodeSessionId`, `nextPacketIndex`, `totalReadPackets`, `totalReadBytes`, `remainingPackets`, plus Vorbis header/source diagnostics) |
 |CreateVideoAudioDecodeSession |**video** |Create a lightweight decode-session snapshot for session-safe scripting: returns `decodeSessionId` plus readiness/status fields (`status`, `message`, `supported`, `readyForDecode`, `nextPacketIndex`, `remainingPackets`) without consuming packets |
+|IsVideoAudioDecodeReady |**video**, **expectedSessionId**=0 |Compact hot-loop readiness helper: returns (`status`, `message`, `decodeSessionId`, `expectedSessionId`, `isCurrentSession`, `supported`, `readyForDecode`) without full decode-state payload |
 |ResetVideoAudioDecodeSession |**video**, **keepSeededHeaders**=1 |Reset decode-session counters/index to start of audio packet stream and return updated decode-state map (`status`, `message`, decode counters/readiness fields); when keepSeededHeaders=1, preserves seeded Vorbis readiness from `CodecPrivate` |
 |SetVideoLooping |**video**, **enabled**=1 |Enable/disable video looping |
 |GetVideoLooping |**video** |Get current looping mode (1/0) |
@@ -854,6 +855,7 @@ Notes:
 - `GetVideoAudioDecodeState` is the stable session/progress query API for scripting against decode lifecycle states (`ready`, `not-ready`, `unsupported-codec`, `end-of-stream`, `web-backend`) without depending on internal decoder implementation details.
 - `GetVideoAudioDecodeState` and `ResetVideoAudioDecodeSession` now include a `message` field so scripts can log human-readable state transitions without custom mapping tables.
 - `CreateVideoAudioDecodeSession` is a tiny one-call session bootstrap API for scripts: read `decodeSessionId` and initial readiness/status before issuing guarded decode-path calls.
+- `IsVideoAudioDecodeReady` is intended for tight loops that only need a compact readiness/session check (`isCurrentSession`, `readyForDecode`) and not the full decode-state map.
 - Recommended session-safe flow: call `CreateVideoAudioDecodeSession` once, then pass `session.decodeSessionId` into `StepVideoAudioDecodeScaffold`, `DecodeVideoAudioPacket`, and `DecodeVideoAudioPacketBatch` as `expectedSessionId`.
 - `decodeSessionId` is a monotonically increasing decode-session marker: `ResetVideoAudioDecodeSession` advances it so scripts can detect resets/restarts directly.
 - `ResetVideoAudioDecodeSession` provides deterministic replay of audio decode scaffolding by clearing consumed counters/index and optionally retaining seeded Vorbis readiness (`keepSeededHeaders=1` by default).
