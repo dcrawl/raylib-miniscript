@@ -261,8 +261,6 @@
 |DrawModelEx |**model**, **position**=[0, 0, 0], **rotationAxis**=[0, 1, 0], **rotationAngle**=0, **scale**=[1, 1, 1], **tint**=WHITE |Draw a model with extended parameters |
 |DrawModelWires |**model**, **position**=[0, 0, 0], **scale**=1.0, **tint**=WHITE |Draw a model wires (with texture if set) |
 |DrawModelWiresEx |**model**, **position**=[0, 0, 0], **rotationAxis**=[0, 1, 0], **rotationAngle**=0, **scale**=[1, 1, 1], **tint**=WHITE |Draw a model wires (with texture if set) with extended parameters |
-|DrawModelPoints |**model**, **position**=[0, 0, 0], **scale**=1.0, **tint**=WHITE |Draw a model points WARNING: OpenGL ES 2.0 does not support point mode drawing |
-|DrawModelPointsEx |**model**, **position**=[0, 0, 0], **rotationAxis**=[0, 1, 0], **rotationAngle**=0, **scale**=[1, 1, 1], **tint**=WHITE |Draw a model points WARNING: OpenGL ES 2.0 does not support point mode drawing |
 |DrawBoundingBox |**box**, **color**=WHITE |Draw a bounding box with wires |
 |UploadMesh |**mesh**, **dynamic**=0 |Upload vertex data into a VAO (if supported) and VBO |
 |UpdateMeshBuffer |**mesh**, **index**, **data**, **offset**=0 |Update mesh vertex data in GPU for a specific buffer index |
@@ -474,10 +472,13 @@
 |GenImageFontAtlas |**glyphs**, **glyphRecs**, **fontSize**, **padding**, **packMethod** |Generate image font atlas using chars info NOTE: Packing method: 0-Default, 1-Skyline |
 |TextFormat |**text**, **args**=ValueList( | |
 |TextFindIndex |**text**, **search** |Find first text occurrence within a string REQUIRES: strstr() |
-|GetTextBetween |**text**, **begin**, **end** |Get text between two strings |
-|TextReplace |**text**, **search**, **replacement** |Replace text string REQUIRES: strstr(), strncpy() WARNING: Allocated memory must be manually freed |
-|TextReplaceBetween |**text**, **begin**, **end**, **replacement** |Replace text between two specific strings REQUIRES: strncpy() NOTE: If (replacement == NULL) remove "begin"[ ]"end" text WARNING: Returned string must be freed by user |
-|TextInsert |**text**, **insert**, **position** |Insert text in a specific position, moves all text forward WARNING: Allocated memory must be manually freed |
+|GetTextBetween |**text**, **begin**, **end** |Get text between two strings NOTE: Uses internal static buffer semantics |
+|TextReplace |**text**, **search**, **replacement** |Replace text string REQUIRES: strstr(), strncpy() NOTE: Uses internal static buffer semantics |
+|TextReplaceAlloc |**text**, **search**, **replacement** |Replace text string with allocated result WARNING: Internal allocation is handled by binding |
+|TextReplaceBetween |**text**, **begin**, **end**, **replacement** |Replace text between two specific strings REQUIRES: strncpy() NOTE: If (replacement == NULL) remove "begin"[ ]"end" text NOTE: Uses internal static buffer semantics |
+|TextReplaceBetweenAlloc |**text**, **begin**, **end**, **replacement** |Replace text between two specific strings with allocated result WARNING: Internal allocation is handled by binding |
+|TextInsert |**text**, **insert**, **position** |Insert text in a specific position, moves all text forward NOTE: Uses internal static buffer semantics |
+|TextInsertAlloc |**text**, **insert**, **position** |Insert text in a specific position with allocated result WARNING: Internal allocation is handled by binding |
 |TextSplit |**text**, **delimiter** | |
 |TextJoin |**textList**, **delimiter**="" |Join text strings with delimiter REQUIRES: memset(), memcpy() |
 |TextAppend |**text**, **append** |Append text at specific position and move cursor WARNING: It's up to the user to make sure appended text does not overflow the buffer! |
