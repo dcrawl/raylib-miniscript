@@ -69,11 +69,6 @@ static int* GetCodepointsFromValue(Value value, int* codepointCount) {
 	return nullptr;
 }
 
-// A little hack to fix compilation errors (make minerobber remove this when 5.6 comes out)
-#if !RAYLIB_VERSION_GT(5,5)
-const char *TextJoin(char **parts, int count, const char *delimiter) { return TextJoin((const char**)parts, count, delimiter); };
-#endif /* !RAYLIB_VERSION_GT(5,5) */
-
 void AddRTextMethods(ValueDict raylibModule) {
 	Intrinsic *i;
 
@@ -695,8 +690,6 @@ void AddRTextMethods(ValueDict raylibModule) {
 		return IntrinsicResult(result);
 	};
 	raylibModule.SetValue("TextFindIndex", i->GetFunc());
-
-#if RAYLIB_VERSION_GT(5, 5)
 	i = Intrinsic::Create("");
 	i->AddParam("text");
 	i->AddParam("begin");
@@ -705,13 +698,11 @@ void AddRTextMethods(ValueDict raylibModule) {
 		String textStr = context->GetVar(String("text")).ToString();
 		String beginStr = context->GetVar(String("begin")).ToString();
 		String endStr = context->GetVar(String("end")).ToString();
-		char* result = GetTextBetween(textStr.c_str(), beginStr.c_str(), endStr.c_str());
+		const char* result = GetTextBetween(textStr.c_str(), beginStr.c_str(), endStr.c_str());
 		String ret(result);
-		MemFree(result);
 		return IntrinsicResult(ret);
 	};
 	raylibModule.SetValue("GetTextBetween", i->GetFunc());
-#endif /* RAYLIB_VERSION_GT(5, 5) */
 
 	i = Intrinsic::Create("");
 	i->AddParam("text");
@@ -721,14 +712,28 @@ void AddRTextMethods(ValueDict raylibModule) {
 		String textStr = context->GetVar(String("text")).ToString();
 		String searchStr = context->GetVar(String("search")).ToString();
 		String replacementStr = context->GetVar(String("replacement")).ToString();
-		char* result = TextReplace(textStr.c_str(), searchStr.c_str(), replacementStr.c_str());
+		const char* result = TextReplace(textStr.c_str(), searchStr.c_str(), replacementStr.c_str());
 		String ret(result);
-		MemFree(result);
 		return IntrinsicResult(ret);
 	};
 	raylibModule.SetValue("TextReplace", i->GetFunc());
 
-#if RAYLIB_VERSION_GT(5, 5)
+	i = Intrinsic::Create("");
+	i->AddParam("text");
+	i->AddParam("search");
+	i->AddParam("replacement");
+	i->code = INTRINSIC_LAMBDA {
+		String textStr = context->GetVar(String("text")).ToString();
+		String searchStr = context->GetVar(String("search")).ToString();
+		String replacementStr = context->GetVar(String("replacement")).ToString();
+		char* result = TextReplaceAlloc(textStr.c_str(), searchStr.c_str(), replacementStr.c_str());
+		if (result == nullptr) return IntrinsicResult::Null;
+		String ret(result);
+		MemFree(result);
+		return IntrinsicResult(ret);
+	};
+	raylibModule.SetValue("TextReplaceAlloc", i->GetFunc());
+
 	i = Intrinsic::Create("");
 	i->AddParam("text");
 	i->AddParam("begin");
@@ -739,13 +744,29 @@ void AddRTextMethods(ValueDict raylibModule) {
 		String beginStr = context->GetVar(String("begin")).ToString();
 		String endStr = context->GetVar(String("end")).ToString();
 		String replacementStr = context->GetVar(String("replacement")).ToString();
-		char* result = TextReplaceBetween(textStr.c_str(), beginStr.c_str(), endStr.c_str(), replacementStr.c_str());
+		const char* result = TextReplaceBetween(textStr.c_str(), beginStr.c_str(), endStr.c_str(), replacementStr.c_str());
+		String ret(result);
+		return IntrinsicResult(ret);
+	};
+	raylibModule.SetValue("TextReplaceBetween", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("text");
+	i->AddParam("begin");
+	i->AddParam("end");
+	i->AddParam("replacement");
+	i->code = INTRINSIC_LAMBDA {
+		String textStr = context->GetVar(String("text")).ToString();
+		String beginStr = context->GetVar(String("begin")).ToString();
+		String endStr = context->GetVar(String("end")).ToString();
+		String replacementStr = context->GetVar(String("replacement")).ToString();
+		char* result = TextReplaceBetweenAlloc(textStr.c_str(), beginStr.c_str(), endStr.c_str(), replacementStr.c_str());
+		if (result == nullptr) return IntrinsicResult::Null;
 		String ret(result);
 		MemFree(result);
 		return IntrinsicResult(ret);
 	};
-	raylibModule.SetValue("TextReplaceBetween", i->GetFunc());
-#endif /* RAYLIB_VERSION_GT(5, 5) */
+	raylibModule.SetValue("TextReplaceBetweenAlloc", i->GetFunc());
 
 	i = Intrinsic::Create("");
 	i->AddParam("text");
@@ -755,12 +776,27 @@ void AddRTextMethods(ValueDict raylibModule) {
 		String textStr = context->GetVar(String("text")).ToString();
 		String insertStr = context->GetVar(String("insert")).ToString();
 		int position = context->GetVar(String("position")).IntValue();
-		char* result = TextInsert(textStr.c_str(), insertStr.c_str(), position);
+		const char* result = TextInsert(textStr.c_str(), insertStr.c_str(), position);
+		String ret(result);
+		return IntrinsicResult(ret);
+	};
+	raylibModule.SetValue("TextInsert", i->GetFunc());
+
+	i = Intrinsic::Create("");
+	i->AddParam("text");
+	i->AddParam("insert");
+	i->AddParam("position");
+	i->code = INTRINSIC_LAMBDA {
+		String textStr = context->GetVar(String("text")).ToString();
+		String insertStr = context->GetVar(String("insert")).ToString();
+		int position = context->GetVar(String("position")).IntValue();
+		char* result = TextInsertAlloc(textStr.c_str(), insertStr.c_str(), position);
+		if (result == nullptr) return IntrinsicResult::Null;
 		String ret(result);
 		MemFree(result);
 		return IntrinsicResult(ret);
 	};
-	raylibModule.SetValue("TextInsert", i->GetFunc());
+	raylibModule.SetValue("TextInsertAlloc", i->GetFunc());
 
 	i = Intrinsic::Create("");
 	i->AddParam("text");
