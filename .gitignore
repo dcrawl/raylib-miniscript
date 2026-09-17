@@ -29,3 +29,6 @@ emsdk
 # clangd (symlink to build/compile_commands.json)
 compile_commands.json
 .cache/
+
+# Golden-image test output (regenerated each run; only reference/ is checked in)
+tests/golden/output/

@@ -284,4 +284,27 @@ else()
     )
 
     target_compile_options(interp_tests PRIVATE -O0 -g -Wall -DPLATFORM_DESKTOP -fexceptions)
+
+    #---------------------------------------------------------------------------
+    # ember_tests - EmberEngine's own C++ engine/binding unit tests
+    #
+    # Placeholder scaffold (see tests/ember_tests.cpp); extend with real tests
+    # as EmberEngine's own engine/binding code lands. Needs nothing but
+    # MiniScript, like interp_tests.
+    #
+    #   cmake --build build --target ember_tests && ./build/ember_tests
+    #---------------------------------------------------------------------------
+    add_executable(ember_tests EXCLUDE_FROM_ALL
+        tests/ember_tests.cpp
+        ${MINISCRIPT_SOURCES}
+    )
+
+    target_include_directories(ember_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${MS2_DIR}/cpp/core
+        ${MS2_DIR}/cpp
+        ${MS2_DIR}/generated
+    )
+
+    target_compile_options(ember_tests PRIVATE -O0 -g -Wall -DPLATFORM_DESKTOP -fexceptions)
 endif()
