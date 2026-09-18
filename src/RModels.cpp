@@ -1376,6 +1376,66 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("SetModelMeshMaterial", i.GetFunc());
 
+	// GetModelMesh / GetModelMaterial: expose a loaded Model's internal
+	// meshes[]/materials[] arrays as ordinary, independently-usable Mesh/
+	// Material values -- the same values GenMesh*/LoadMaterialDefault
+	// already return, via the SAME MeshToValue/MaterialToValue conversion
+	// those use. Closes a real gap: previously a Model's mesh/material data
+	// was reachable only through DrawModel, which (a) cannot receive a
+	// custom material -- there is no script-level way to reach or replace
+	// model.materials[0] otherwise -- and (b) does not honor a shader bound
+	// via BeginShaderMode/EndShaderMode (DrawModel/DrawMesh always bind
+	// material.shader directly; only DrawMesh with an EXPLICIT material
+	// argument lets a script attach a custom shader, e.g. a fog/distance-fade
+	// shader, to imported geometry at all). With these two, an imported
+	// .obj's own mesh/material can be pulled out once at load time,
+	// SetMaterialShader'd, and drawn via the ordinary DrawMesh(mesh,
+	// material, transform) path exactly like a GenMeshCube-based surface --
+	// letting real, non-primitive geometry participate in a custom-shaded
+	// scene for the first time.
+	//
+	// SHALLOW COPY CAVEAT (same as LoadModelFromMesh's own docstring: "get a
+	// copy of mesh pointing to same data as original version... be
+	// careful!"): the returned Mesh/Material value wraps a NEW heap struct,
+	// but that struct's own internal pointers (the mesh's GPU vertex
+	// buffers/VAO id; the material's texture maps and shader) are a shallow
+	// copy -- they point at the SAME underlying GPU resources the source
+	// Model owns, not independent copies. Safe to DrawMesh with for as long
+	// as the source Model is still alive. Do NOT call UnloadMesh/
+	// UnloadMaterial on a value obtained this way -- that frees the shared
+	// GPU resources out from under the model that still thinks it owns
+	// them (a double-free once the model itself is later unloaded, or a
+	// use-after-free if the model is drawn again first). The intended
+	// lifecycle is: load the model once, extract what you need via these
+	// two calls, keep the model alive (or leak it, same as this project's
+	// own wall/floor/door materials already do) for as long as the
+	// extracted mesh/material are still in use.
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr) return IntrinsicResult::Null;
+		int index = context.GetArg(1).IntValue();
+		if (index < 0 || index >= modelPtr->meshCount) return IntrinsicResult::Null;
+		rcMesh++;
+		return IntrinsicResult(MeshToValue(modelPtr->meshes[index]));
+	});
+	raylibModule.SetValue("GetModelMesh", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr) return IntrinsicResult::Null;
+		int index = context.GetArg(1).IntValue();
+		if (index < 0 || index >= modelPtr->materialCount) return IntrinsicResult::Null;
+		rcMaterial++;
+		return IntrinsicResult(MaterialToValue(modelPtr->materials[index]));
+	});
+	raylibModule.SetValue("GetModelMaterial", i.GetFunc());
+
 	// Model animations
 
 	i = Intrinsic::Create("");
