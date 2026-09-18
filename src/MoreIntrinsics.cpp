@@ -789,7 +789,8 @@ void AddMoreIntrinsics() {
 		setEnvVar("MS_IMPORT_PATH",
 			"$MS_SCRIPT_DIR" PATH_SEP_STR
 			"$MS_SCRIPT_DIR/lib" PATH_SEP_STR
-			"$MS_EXE_DIR/assets/lib");
+			"$MS_EXE_DIR/assets/lib" PATH_SEP_STR
+			"$MS_EXE_DIR/assets/emberengine/lib");
 	}
 }
 
