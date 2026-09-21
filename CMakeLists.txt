@@ -65,6 +65,7 @@ set(APP_SOURCES
     src/FileSystem.cpp
     src/HostPaths.cpp
     src/UserDisks.cpp
+    src/RVideo.cpp
 )
 
 # Create executable
@@ -150,6 +151,16 @@ if(EMSCRIPTEN)
         )
     endif()
 
+    # Copy web video interop helper if present
+    if(EXISTS ${CMAKE_SOURCE_DIR}/web/video-interop.js)
+        add_custom_command(TARGET raylib-miniscript POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy
+            ${CMAKE_SOURCE_DIR}/web/video-interop.js
+            ${CMAKE_BINARY_DIR}/video-interop.js
+            COMMENT "Copying video-interop.js to build directory"
+        )
+    endif()
+
     message(STATUS "raylib-miniscript Configuration: Web (Emscripten)")
     message(STATUS "  Raylib library: ${RAYLIB_WEB_LIB}")
     message(STATUS "  Output: raylib-miniscript.html, .js, .wasm")
@@ -185,6 +196,37 @@ else()
                 "  2. Install raylib system-wide")
         endif()
     endif()
+
+    option(ENABLE_VPX_VIDEO "Enable VP8 video playback with libvpx" ON)
+    if(ENABLE_VPX_VIDEO)
+        find_path(VPX_INCLUDE_DIR vpx/vpx_decoder.h)
+        find_library(VPX_LIBRARY NAMES vpx)
+        if(VPX_INCLUDE_DIR AND VPX_LIBRARY)
+            target_include_directories(raylib-miniscript PRIVATE ${VPX_INCLUDE_DIR})
+            target_link_libraries(raylib-miniscript ${VPX_LIBRARY})
+            target_compile_definitions(raylib-miniscript PRIVATE HAVE_LIBVPX=1)
+            message(STATUS "VP8 video support enabled: ${VPX_LIBRARY}")
+        else()
+            message(WARNING "libvpx not found; video playback APIs will be unavailable at runtime")
+        endif()
+    endif()
+
+    option(ENABLE_VORBIS_AUDIO "Enable Vorbis audio decoding with libvorbis" ON)
+    if(ENABLE_VORBIS_AUDIO)
+        find_path(VORBIS_INCLUDE_DIR vorbis/codec.h)
+        find_library(VORBIS_LIBRARY NAMES vorbis)
+        find_path(OGG_INCLUDE_DIR ogg/ogg.h)
+        find_library(OGG_LIBRARY NAMES ogg)
+        if(VORBIS_INCLUDE_DIR AND VORBIS_LIBRARY AND OGG_INCLUDE_DIR AND OGG_LIBRARY)
+            target_include_directories(raylib-miniscript PRIVATE ${VORBIS_INCLUDE_DIR} ${OGG_INCLUDE_DIR})
+            target_link_libraries(raylib-miniscript ${VORBIS_LIBRARY} ${OGG_LIBRARY})
+            target_compile_definitions(raylib-miniscript PRIVATE HAVE_LIBVORBIS=1)
+            message(STATUS "Vorbis audio decoding enabled: ${VORBIS_LIBRARY}")
+        else()
+            message(WARNING "libvorbis/libogg not found; Vorbis audio decoding will remain stubbed")
+        endif()
+    endif()
+
 
     # Platform-specific libraries
     if(APPLE)
@@ -307,4 +349,18 @@ else()
     )
 
     target_compile_options(ember_tests PRIVATE -O0 -g -Wall -DPLATFORM_DESKTOP -fexceptions)
+
+    option(ENABLE_VP8_SMOKE_TESTS "Enable VP8 smoke tests in CTest" ON)
+    if(BUILD_TESTING AND ENABLE_VP8_SMOKE_TESTS)
+        add_test(
+            NAME vp8_smokes
+            COMMAND /usr/bin/env bash ${CMAKE_SOURCE_DIR}/scripts/run-vp8-smokes.sh $<TARGET_FILE:raylib-miniscript>
+        )
+        set_tests_properties(vp8_smokes PROPERTIES
+            LABELS "smoke;video"
+            TIMEOUT 300
+            RUN_SERIAL TRUE
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        )
+    endif()
 endif()

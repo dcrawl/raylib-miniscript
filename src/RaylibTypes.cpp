@@ -65,8 +65,9 @@ const Value& FontClass() {
 }
 
 const Value& VideoPlayerClass() {
-	static ValueDict map;
-	if (map.Count() == 0) {
+	static Value classValue;
+	if (classValue.IsNull()) {
+		ValueDict map;
 		map.SetValue(String("_handle"), Value::zero);
 		map.SetValue(String("texture"), Value::null);
 		map.SetValue(String("width"), Value::zero);
@@ -78,8 +79,11 @@ const Value& VideoPlayerClass() {
 		map.SetValue(String("timePlayed"), Value::zero);
 		map.SetValue(String("isPlaying"), Value::zero);
 		map.SetValue(String("isFinished"), Value::zero);
+		classValue = GCManager::NewMapFromDict(map);   // shares map's storage
+		GCManager::AddRoot(classValue);
+		Intrinsic::AddShortName(classValue, String("raylib.VideoPlayer"));
 	}
-	return map;
+	return classValue;
 }
 
 
@@ -504,18 +508,18 @@ Value VideoPlayerToValue(void* playerHandle, Texture texture, int width, int hei
 	map.SetValue(String("timePlayed"), Value::zero);
 	map.SetValue(String("isPlaying"), Value::zero);
 	map.SetValue(String("isFinished"), Value::zero);
-	return Value(map);
+	return DynamicMap(map);
 }
 
 void* ValueToVideoPlayerHandle(Value value) {
-	if (value.type != ValueType::Map) return nullptr;
+	if (value.Type() != ValueType::Map) return nullptr;
 	ValueDict map = value.GetDict();
 	Value handleVal = map.Lookup(String("_handle"), Value::zero);
 	return ValueToPointer(handleVal);
 }
 
 void UpdateVideoPlayerStateValue(Value value, int currentFrame, double timePlayed, int isPlaying, int isFinished) {
-	if (value.type != ValueType::Map) return;
+	if (value.Type() != ValueType::Map) return;
 	ValueDict map = value.GetDict();
 	map.SetValue(String("currentFrame"), Value(currentFrame));
 	map.SetValue(String("timePlayed"), Value(timePlayed));

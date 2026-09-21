@@ -26,7 +26,7 @@ void AddRMathMethods(ValueDict& raylibModule);
 void AddRShapesMethods(ValueDict& raylibModule);
 void AddRTextMethods(ValueDict& raylibModule);
 void AddRTexturesMethods(ValueDict& raylibModule);
-void AddRVideoMethods(ValueDict raylibModule);
+void AddRVideoMethods(ValueDict& raylibModule);
 
 // And one more for all the constants
 void AddConstants(ValueDict& raylibModule);
@@ -43,7 +43,7 @@ void AddRaylibIntrinsics() {
 	f.set_Code(INTRINSIC_LAMBDA { return IntrinsicResult(MatrixClass()); });
 
 	f = Intrinsic::Create("VideoPlayer");
-	f->code = INTRINSIC_LAMBDA { return IntrinsicResult(VideoPlayerClass()); };
+	f.set_Code(INTRINSIC_LAMBDA { return IntrinsicResult(VideoPlayerClass()); });
 
 	// Create and register the main raylib module.  Built on first use, then
 	// wrapped and GC-rooted once; every later reference to the global `raylib`

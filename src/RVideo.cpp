@@ -8,8 +8,7 @@
 #include "RaylibIntrinsics.h"
 #include "RaylibTypes.h"
 #include "raylib.h"
-#include "MiniscriptInterpreter.h"
-#include "MiniscriptTypes.h"
+#include "miniscript.h"
 #include "macros.h"
 
 #include <stdio.h>
@@ -1944,10 +1943,10 @@ static void DestroyVideoPlayer(VideoPlayerState* state) {
 }
 
 static void FreeVideoMapTextureHandle(Value videoVal) {
-	if (videoVal.type != ValueType::Map) return;
+	if (videoVal.Type() != ValueType::Map) return;
 	ValueDict videoMap = videoVal.GetDict();
 	Value texVal = videoMap.Lookup(String("texture"), Value::null);
-	if (texVal.type != ValueType::Map) return;
+	if (texVal.Type() != ValueType::Map) return;
 	ValueDict texMap = texVal.GetDict();
 	Value texHandleVal = texMap.Lookup(String("_handle"), Value::zero);
 	Texture* texPtr = (Texture*)ValueToPointer(texHandleVal);
@@ -1996,13 +1995,13 @@ static VideoPlayerState* LoadWebVideo(const char* path) {
 
 }  // namespace
 
-void AddRVideoMethods(ValueDict raylibModule) {
-	Intrinsic* i;
+void AddRVideoMethods(ValueDict& raylibModule) {
+	Intrinsic i;
 
 	i = Intrinsic::Create("");
-	i->AddParam("fileName");
-	i->code = INTRINSIC_LAMBDA {
-		String path = context->GetVar(String("fileName")).ToString();
+	i.AddParam("fileName");
+	i.set_Code(INTRINSIC_LAMBDA {
+		String path = context.GetVar(String("fileName")).ToString();
 #if !defined(PLATFORM_WEB) && !HAVE_LIBVPX
 		TraceLog(LOG_WARNING, "LoadVideoStream: libvpx support not enabled in this build");
 		(void)path;
@@ -2017,21 +2016,21 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		return IntrinsicResult(VideoPlayerToValue(state, state->texture, state->width, state->height, (int)state->frameCount, state->frameRate, state->timeLength));
 #endif
-	};
-	raylibModule.SetValue("LoadVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("LoadVideoStream", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		return IntrinsicResult(state != nullptr && state->valid);
-	};
-	raylibModule.SetValue("IsVideoStreamValid", i->GetFunc());
+	});
+	raylibModule.SetValue("IsVideoStreamValid", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state || !state->valid) return IntrinsicResult::Null;
 #ifdef PLATFORM_WEB
@@ -2061,13 +2060,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		state->finishedPrev = state->finished;
 		SyncVideoStateValue(videoVal, state);
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("PlayVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("PlayVideoStream", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state || !state->valid) return IntrinsicResult::Null;
 #ifdef PLATFORM_WEB
@@ -2087,13 +2086,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 #endif
 		SyncVideoStateValue(videoVal, state);
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("PauseVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("PauseVideoStream", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		if (!state->finished) {
@@ -2119,13 +2118,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		state->finishedPrev = state->finished;
 		SyncVideoStateValue(videoVal, state);
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("ResumeVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("ResumeVideoStream", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		state->playing = false;
@@ -2148,18 +2147,18 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		state->finishEventPending = false;
 		SyncVideoStateValue(videoVal, state);
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("StopVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("StopVideoStream", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("position", Value::zero);
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video");
+	i.AddParam("position", Value::zero);
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
-		double pos = context->GetVar(String("position")).DoubleValue();
+		double pos = context.GetVar(String("position")).DoubleValue();
 		if (pos < 0.0) pos = 0.0;
 		if (state->timeLength > 0.0 && pos > state->timeLength) pos = state->timeLength;
 
@@ -2187,13 +2186,13 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		state->finishedPrev = state->finished;
 		SyncVideoStateValue(videoVal, state);
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("SeekVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("SeekVideoStream", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
@@ -2332,55 +2331,55 @@ void AddRVideoMethods(ValueDict raylibModule) {
 
 		SyncVideoStateValue(videoVal, state);
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("UpdateVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("UpdateVideoStream", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		return IntrinsicResult(state && state->valid && state->playing && !state->finished);
-	};
-	raylibModule.SetValue("IsVideoStreamPlaying", i->GetFunc());
+	});
+	raylibModule.SetValue("IsVideoStreamPlaying", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 #ifdef PLATFORM_WEB
 		if (state->webPlayer) state->timeLength = WebVideoGetTimeLength(state->webHandle);
 #endif
 		return IntrinsicResult(state->timeLength);
-	};
-	raylibModule.SetValue("GetVideoTimeLength", i->GetFunc());
+	});
+	raylibModule.SetValue("GetVideoTimeLength", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 #ifdef PLATFORM_WEB
 		if (state->webPlayer) state->timePlayed = WebVideoGetTimePlayed(state->webHandle);
 #endif
 		return IntrinsicResult(state->timePlayed);
-	};
-	raylibModule.SetValue("GetVideoTimePlayed", i->GetFunc());
+	});
+	raylibModule.SetValue("GetVideoTimePlayed", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
-		if (videoVal.type != ValueType::Map) return IntrinsicResult::Null;
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
+		if (videoVal.Type() != ValueType::Map) return IntrinsicResult::Null;
 		ValueDict map = videoVal.GetDict();
 		return IntrinsicResult(map.Lookup(String("texture"), Value::null));
-	};
-	raylibModule.SetValue("GetVideoTexture", i->GetFunc());
+	});
+	raylibModule.SetValue("GetVideoTexture", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
 		ValueDict info;
@@ -2402,15 +2401,15 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("audioFirstPacketTime"), Value(state->audioFirstPacketTime));
 		info.SetValue(String("audioLastPacketTime"), Value(state->audioLastPacketTime));
 		info.SetValue(String("isWebBackend"), Value(state->webPlayer ? 1 : 0));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("GetVideoInfo", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("GetVideoInfo", i.GetFunc());
 
 	// Alias for readability.
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
 		ValueDict info;
@@ -2432,33 +2431,33 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("audioFirstPacketTime"), Value(state->audioFirstPacketTime));
 		info.SetValue(String("audioLastPacketTime"), Value(state->audioLastPacketTime));
 		info.SetValue(String("isWebBackend"), Value(state->webPlayer ? 1 : 0));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("GetVideoMetadata", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("GetVideoMetadata", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		return IntrinsicResult(Value(String(state->webPlayer ? "web" : "desktop")));
-	};
-	raylibModule.SetValue("GetVideoBackend", i->GetFunc());
+	});
+	raylibModule.SetValue("GetVideoBackend", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video", Value::null);
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video", Value::null);
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (state && state->valid) {
 			return IntrinsicResult(Value(String(state->lastError.c_str())));
 		}
 		return IntrinsicResult(Value(String(gLastVideoLoadError.c_str())));
-	};
-	raylibModule.SetValue("GetVideoLastError", i->GetFunc());
+	});
+	raylibModule.SetValue("GetVideoLastError", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->code = INTRINSIC_LAMBDA {
+	i.set_Code(INTRINSIC_LAMBDA {
 		ValueDict info;
 		info.SetValue(String("ok"), Value(String("ok")));
 		info.SetValue(String("ready"), Value(String("ready")));
@@ -2469,14 +2468,14 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("readFailed"), Value(String("read-failed")));
 		info.SetValue(String("sessionMismatch"), Value(String("session-mismatch")));
 		info.SetValue(String("webBackend"), Value(String("web-backend")));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("GetVideoAudioDecodeStatuses", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("GetVideoAudioDecodeStatuses", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
 		ValueDict info;
@@ -2506,14 +2505,14 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("decodedVorbisPackets"), Value((int)state->vorbisPacketsDecoded));
 		info.SetValue(String("status"), Value(String("ok")));
 		info.SetValue(String("message"), Value(String("audio decode/playback capability snapshot")));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("GetVideoAudioDecodeCapabilities", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("GetVideoAudioDecodeCapabilities", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
 		ValueDict info;
@@ -2553,19 +2552,19 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("avgDelta"), Value(avgDelta));
 		info.SetValue(String("nonMonotonicCount"), Value(nonMonotonicCount));
 		info.SetValue(String("isMonotonic"), Value(nonMonotonicCount == 0 ? 1 : 0));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("GetVideoAudioIndexDiagnostics", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("GetVideoAudioIndexDiagnostics", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("maxPackets", Value(1));
-	i->AddParam("expectedSessionId", Value::zero);
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("maxPackets", Value(1));
+	i.AddParam("expectedSessionId", Value::zero);
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
-		int maxPackets = context->GetVar(String("maxPackets")).IntValue();
-		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
+		int maxPackets = context.GetVar(String("maxPackets")).IntValue();
+		int expectedSessionId = context.GetVar(String("expectedSessionId")).IntValue();
 		if (maxPackets < 1) maxPackets = 1;
 		if (maxPackets > 1024) maxPackets = 1024;
 
@@ -2615,7 +2614,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			int guardReadyForDecode = 0;
 			if (state->audioDecodeScaffoldReady && state->audioCodecName == "A_VORBIS" && guardVorbisHeadersReady) guardReadyForDecode = 1;
 			info.SetValue(String("readyForDecode"), Value(guardReadyForDecode));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 		}
 
 		int readCount = StepDesktopAudioDecodeScaffold(state, maxPackets);
@@ -2665,18 +2664,18 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		}
 		info.SetValue(String("status"), Value(String(status)));
 		info.SetValue(String("message"), Value(String(message)));
-		return IntrinsicResult(Value(info));
+		return IntrinsicResult(DynamicMap(info));
 #endif
-	};
-	raylibModule.SetValue("StepVideoAudioDecodeScaffold", i->GetFunc());
+	});
+	raylibModule.SetValue("StepVideoAudioDecodeScaffold", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("expectedSessionId", Value::zero);
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("expectedSessionId", Value::zero);
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
-		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
+		int expectedSessionId = context.GetVar(String("expectedSessionId")).IntValue();
 
 		ValueDict info;
 		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
@@ -2700,32 +2699,32 @@ void AddRVideoMethods(ValueDict raylibModule) {
 #ifdef PLATFORM_WEB
 		info.SetValue(String("status"), Value(String("web-backend")));
 		info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
-		return IntrinsicResult(Value(info));
+		return IntrinsicResult(DynamicMap(info));
 #else
 		if (state->webPlayer) {
 			info.SetValue(String("status"), Value(String("web-backend")));
 			info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 		}
 		if (expectedSessionId > 0 && expectedSessionId != (int)state->audioDecodeSessionId) {
 			info.SetValue(String("status"), Value(String("session-mismatch")));
 			info.SetValue(String("message"), Value(String("stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession")));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 		}
 		if (!state->audioDecodeScaffoldReady) {
 			info.SetValue(String("status"), Value(String("unsupported-codec")));
 			info.SetValue(String("message"), Value(String("audio decode path is not scaffolded for this codec")));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 		}
 		if (!ready) {
 			info.SetValue(String("status"), Value(String("not-ready")));
 			info.SetValue(String("message"), Value(String("audio headers are incomplete; decoder not ready")));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 		}
 		if (state->nextAudioPacketIndex >= state->audioPackets.size()) {
 			info.SetValue(String("status"), Value(String("end-of-stream")));
 			info.SetValue(String("message"), Value(String("no more audio packets to consume")));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 		}
 
 		uint32_t packetIndex = 0;
@@ -2737,7 +2736,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes, &decodedSamples, &decodedChannels, &decodedSampleRate)) {
 			info.SetValue(String("status"), Value(String("read-failed")));
 			info.SetValue(String("message"), Value(String("failed to read audio packet from stream")));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 		}
 
 		info.SetValue(String("consumedPacket"), Value(1));
@@ -2763,21 +2762,21 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
 		info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
 		info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
-		return IntrinsicResult(Value(info));
+		return IntrinsicResult(DynamicMap(info));
 #endif
-	};
-	raylibModule.SetValue("DecodeVideoAudioPacket", i->GetFunc());
+	});
+	raylibModule.SetValue("DecodeVideoAudioPacket", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("maxPackets", Value(4));
-	i->AddParam("expectedSessionId", Value::zero);
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("maxPackets", Value(4));
+	i.AddParam("expectedSessionId", Value::zero);
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
-		int maxPackets = context->GetVar(String("maxPackets")).IntValue();
-		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
+		int maxPackets = context.GetVar(String("maxPackets")).IntValue();
+		int expectedSessionId = context.GetVar(String("expectedSessionId")).IntValue();
 		if (maxPackets < 1) maxPackets = 1;
 		if (maxPackets > 1024) maxPackets = 1024;
 
@@ -2808,22 +2807,22 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		ValueDict info = makeBaseResult(state);
 		info.SetValue(String("status"), Value(String("web-backend")));
 		info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
-		results.Add(Value(info));
-		return IntrinsicResult(Value(results));
+		results.Add(DynamicMap(info));
+		return IntrinsicResult(DynamicList(results));
 #else
 		if (state->webPlayer) {
 			ValueDict info = makeBaseResult(state);
 			info.SetValue(String("status"), Value(String("web-backend")));
 			info.SetValue(String("message"), Value(String("audio decode stub is desktop-only")));
-			results.Add(Value(info));
-			return IntrinsicResult(Value(results));
+			results.Add(DynamicMap(info));
+			return IntrinsicResult(DynamicList(results));
 		}
 		if (expectedSessionId > 0 && expectedSessionId != (int)state->audioDecodeSessionId) {
 			ValueDict info = makeBaseResult(state);
 			info.SetValue(String("status"), Value(String("session-mismatch")));
 			info.SetValue(String("message"), Value(String("stale decode session id; call GetVideoAudioDecodeState or ResetVideoAudioDecodeSession")));
-			results.Add(Value(info));
-			return IntrinsicResult(Value(results));
+			results.Add(DynamicMap(info));
+			return IntrinsicResult(DynamicList(results));
 		}
 
 		for (int iter = 0; iter < maxPackets; iter++) {
@@ -2833,19 +2832,19 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			if (!state->audioDecodeScaffoldReady) {
 				info.SetValue(String("status"), Value(String("unsupported-codec")));
 				info.SetValue(String("message"), Value(String("audio decode path is not scaffolded for this codec")));
-				results.Add(Value(info));
+				results.Add(DynamicMap(info));
 				break;
 			}
 			if (!ready) {
 				info.SetValue(String("status"), Value(String("not-ready")));
 				info.SetValue(String("message"), Value(String("audio headers are incomplete; decoder not ready")));
-				results.Add(Value(info));
+				results.Add(DynamicMap(info));
 				break;
 			}
 			if (state->nextAudioPacketIndex >= state->audioPackets.size()) {
 				info.SetValue(String("status"), Value(String("end-of-stream")));
 				info.SetValue(String("message"), Value(String("no more audio packets to consume")));
-				results.Add(Value(info));
+				results.Add(DynamicMap(info));
 				break;
 			}
 
@@ -2858,7 +2857,7 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			if (!DecodeDesktopAudioPacketStub(state, &packetIndex, &packetPts, &packetBytes, &decodedSamples, &decodedChannels, &decodedSampleRate)) {
 				info.SetValue(String("status"), Value(String("read-failed")));
 				info.SetValue(String("message"), Value(String("failed to read audio packet from stream")));
-				results.Add(Value(info));
+				results.Add(DynamicMap(info));
 				break;
 			}
 
@@ -2885,21 +2884,21 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("totalReadBytes"), Value((double)state->audioBytesRead));
 			info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
 			info.SetValue(String("remainingPackets"), Value((int)(state->audioPackets.size() - state->nextAudioPacketIndex)));
-			results.Add(Value(info));
+			results.Add(DynamicMap(info));
 		}
 
-		return IntrinsicResult(Value(results));
+		return IntrinsicResult(DynamicList(results));
 #endif
-	};
-	raylibModule.SetValue("DecodeVideoAudioPacketBatch", i->GetFunc());
+	});
+	raylibModule.SetValue("DecodeVideoAudioPacketBatch", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("expectedSessionId", Value::zero);
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("expectedSessionId", Value::zero);
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
-		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
+		int expectedSessionId = context.GetVar(String("expectedSessionId")).IntValue();
 
 		ValueDict info;
 		info.SetValue(String("codec"), Value(String(state->audioCodecName.c_str())));
@@ -2972,14 +2971,14 @@ void AddRVideoMethods(ValueDict raylibModule) {
 #endif
 		info.SetValue(String("status"), Value(String(status)));
 		info.SetValue(String("message"), Value(String(message)));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("GetVideoAudioDecodeState", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("GetVideoAudioDecodeState", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 
 		ValueDict info;
@@ -3017,17 +3016,17 @@ void AddRVideoMethods(ValueDict raylibModule) {
 #endif
 		info.SetValue(String("status"), Value(String(status)));
 		info.SetValue(String("message"), Value(String(message)));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("CreateVideoAudioDecodeSession", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("CreateVideoAudioDecodeSession", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("expectedSessionId", Value::zero);
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("expectedSessionId", Value::zero);
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
-		int expectedSessionId = context->GetVar(String("expectedSessionId")).IntValue();
+		int expectedSessionId = context.GetVar(String("expectedSessionId")).IntValue();
 
 		ValueDict info;
 		int supported = state->audioDecodeScaffoldReady ? 1 : 0;
@@ -3063,17 +3062,17 @@ void AddRVideoMethods(ValueDict raylibModule) {
 #endif
 		info.SetValue(String("status"), Value(String(status)));
 		info.SetValue(String("message"), Value(String(message)));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("IsVideoAudioDecodeReady", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("IsVideoAudioDecodeReady", i.GetFunc());
 
 		i = Intrinsic::Create("");
-		i->AddParam("video");
-		i->AddParam("maxFrames", Value::zero);
-		i->code = INTRINSIC_LAMBDA {
-			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		i.AddParam("video");
+		i.AddParam("maxFrames", Value::zero);
+		i.set_Code(INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 			if (!state || !state->valid) return IntrinsicResult::Null;
-			int maxFrames = context->GetVar(String("maxFrames")).IntValue();
+			int maxFrames = context.GetVar(String("maxFrames")).IntValue();
 
 			ValueDict info;
 			info.SetValue(String("decodeSessionId"), Value((int)state->audioDecodeSessionId));
@@ -3085,14 +3084,14 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("message"), Value(String("decoded PCM frame consumption helper is desktop-only")));
 			info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
 			info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 	#else
 			if (state->webPlayer) {
 				info.SetValue(String("status"), Value(String("web-backend")));
 				info.SetValue(String("message"), Value(String("decoded PCM frame consumption helper is desktop-only")));
 				info.SetValue(String("decodedPcmFramesAvailable"), Value((double)state->decodedPcmFramesAvailable));
 				info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
-				return IntrinsicResult(Value(info));
+				return IntrinsicResult(DynamicMap(info));
 			}
 
 			uint64_t wanted = 0;
@@ -3103,15 +3102,15 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("decodedPcmFramesConsumed"), Value((double)state->decodedPcmFramesConsumed));
 			info.SetValue(String("status"), Value(String("ok")));
 			info.SetValue(String("message"), Value(String("decoded PCM frames consumed from placeholder queue")));
-			return IntrinsicResult(Value(info));
+			return IntrinsicResult(DynamicMap(info));
 	#endif
-		};
-		raylibModule.SetValue("ConsumeVideoDecodedPcmFrames", i->GetFunc());
+		});
+		raylibModule.SetValue("ConsumeVideoDecodedPcmFrames", i.GetFunc());
 
 		i = Intrinsic::Create("");
-		i->AddParam("video");
-		i->code = INTRINSIC_LAMBDA {
-			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		i.AddParam("video");
+		i.set_Code(INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 			if (!state || !state->valid) return IntrinsicResult::Null;
 			double effectiveSampleRate = GetEffectiveAudioSampleRate(state);
 			int effectiveChannels = GetEffectiveAudioChannels(state);
@@ -3217,22 +3216,22 @@ void AddRVideoMethods(ValueDict raylibModule) {
 	#endif
 			info.SetValue(String("status"), Value(String(status)));
 			info.SetValue(String("message"), Value(String(message)));
-			return IntrinsicResult(Value(info));
-		};
-		raylibModule.SetValue("GetVideoAudioQueueState", i->GetFunc());
+			return IntrinsicResult(DynamicMap(info));
+		});
+		raylibModule.SetValue("GetVideoAudioQueueState", i.GetFunc());
 
 		i = Intrinsic::Create("");
-		i->AddParam("video");
-		i->AddParam("enabled", Value(1));
-		i->AddParam("clampWindowMs", Value(120.0));
-		i->AddParam("smoothingAlpha", Value::null);
-		i->AddParam("maxStepMs", Value::null);
-		i->AddParam("tuning", Value::null);
-		i->code = INTRINSIC_LAMBDA {
-			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		i.AddParam("video");
+		i.AddParam("enabled", Value(1));
+		i.AddParam("clampWindowMs", Value(120.0));
+		i.AddParam("smoothingAlpha", Value::null);
+		i.AddParam("maxStepMs", Value::null);
+		i.AddParam("tuning", Value::null);
+		i.set_Code(INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 			if (!state || !state->valid) return IntrinsicResult::Null;
-			int enabled = context->GetVar(String("enabled")).IntValue();
-			double clampWindowMs = context->GetVar(String("clampWindowMs")).DoubleValue();
+			int enabled = context.GetVar(String("enabled")).IntValue();
+			double clampWindowMs = context.GetVar(String("clampWindowMs")).DoubleValue();
 			bool hasClampWindowMs = true;
 			bool hasSmoothingAlpha = false;
 			bool hasMaxStepMs = false;
@@ -3241,45 +3240,45 @@ void AddRVideoMethods(ValueDict raylibModule) {
 
 			auto applyTuningMap = [&](ValueDict map) {
 				Value vEnabled = map.Lookup(String("enabled"), Value::null);
-				if (vEnabled.type != ValueType::Null) enabled = vEnabled.IntValue();
+				if (vEnabled.Type() != ValueType::Null) enabled = vEnabled.IntValue();
 				Value vClamp = map.Lookup(String("clampWindowMs"), Value::null);
-				if (vClamp.type != ValueType::Null) {
+				if (vClamp.Type() != ValueType::Null) {
 					clampWindowMs = vClamp.DoubleValue();
 					hasClampWindowMs = true;
 				}
 				Value vAlpha = map.Lookup(String("smoothingAlpha"), Value::null);
-				if (vAlpha.type != ValueType::Null) {
+				if (vAlpha.Type() != ValueType::Null) {
 					smoothingAlpha = vAlpha.DoubleValue();
 					hasSmoothingAlpha = true;
 				}
 				Value vStep = map.Lookup(String("maxStepMs"), Value::null);
-				if (vStep.type != ValueType::Null) {
+				if (vStep.Type() != ValueType::Null) {
 					maxStepMs = vStep.DoubleValue();
 					hasMaxStepMs = true;
 				}
 			};
 
-			Value clampVal = context->GetVar(String("clampWindowMs"));
-			if (clampVal.type == ValueType::Map) {
+			Value clampVal = context.GetVar(String("clampWindowMs"));
+			if (clampVal.Type() == ValueType::Map) {
 				applyTuningMap(clampVal.GetDict());
 			}
 
-			Value alphaVal = context->GetVar(String("smoothingAlpha"));
-			if (alphaVal.type == ValueType::Map) {
+			Value alphaVal = context.GetVar(String("smoothingAlpha"));
+			if (alphaVal.Type() == ValueType::Map) {
 				applyTuningMap(alphaVal.GetDict());
-			} else if (alphaVal.type != ValueType::Null) {
+			} else if (alphaVal.Type() != ValueType::Null) {
 				smoothingAlpha = alphaVal.DoubleValue();
 				hasSmoothingAlpha = true;
 			}
 
-			Value stepVal = context->GetVar(String("maxStepMs"));
-			if (stepVal.type != ValueType::Null) {
+			Value stepVal = context.GetVar(String("maxStepMs"));
+			if (stepVal.Type() != ValueType::Null) {
 				maxStepMs = stepVal.DoubleValue();
 				hasMaxStepMs = true;
 			}
 
-			Value tuningVal = context->GetVar(String("tuning"));
-			if (tuningVal.type == ValueType::Map) {
+			Value tuningVal = context.GetVar(String("tuning"));
+			if (tuningVal.Type() == ValueType::Map) {
 				applyTuningMap(tuningVal.GetDict());
 			}
 
@@ -3319,14 +3318,14 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("audioSyncClampMaxStepMs"), Value(state->audioSyncClampMaxStepMs));
 			info.SetValue(String("status"), Value(String("ok")));
 			info.SetValue(String("message"), Value(String("audio sync tuning updated (clampWindowMs<=0 re-enables adaptive clamp; optional smoothingAlpha/maxStepMs accepted)")));
-			return IntrinsicResult(Value(info));
-		};
-		raylibModule.SetValue("SetVideoAudioSyncTuning", i->GetFunc());
+			return IntrinsicResult(DynamicMap(info));
+		});
+		raylibModule.SetValue("SetVideoAudioSyncTuning", i.GetFunc());
 
 		i = Intrinsic::Create("");
-		i->AddParam("video");
-		i->code = INTRINSIC_LAMBDA {
-			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		i.AddParam("video");
+		i.set_Code(INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 			if (!state || !state->valid) return IntrinsicResult::Null;
 			ValueDict info;
 			info.SetValue(String("syncMode"), Value(String(state->syncMode.c_str())));
@@ -3343,14 +3342,14 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			info.SetValue(String("audioLedTargetSec"), Value(state->lastAudioLedTargetSec));
 			info.SetValue(String("status"), Value(String("ok")));
 			info.SetValue(String("message"), Value(String("audio sync tuning snapshot")));
-			return IntrinsicResult(Value(info));
-		};
-		raylibModule.SetValue("GetVideoAudioSyncTuning", i->GetFunc());
+			return IntrinsicResult(DynamicMap(info));
+		});
+		raylibModule.SetValue("GetVideoAudioSyncTuning", i.GetFunc());
 
 		i = Intrinsic::Create("");
-		i->AddParam("video");
-		i->code = INTRINSIC_LAMBDA {
-			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+		i.AddParam("video");
+		i.set_Code(INTRINSIC_LAMBDA {
+			VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 			if (!state || !state->valid) return IntrinsicResult::Null;
 			ValueDict info;
 			info.SetValue(String("syncMode"), Value(String(state->syncMode.c_str())));
@@ -3380,17 +3379,17 @@ void AddRVideoMethods(ValueDict raylibModule) {
 			}
 #endif
 			info.SetValue(String("framesBuffered"), Value(framesBuffered));
-			return IntrinsicResult(Value(info));
-		};
-		raylibModule.SetValue("GetVideoFrameTimingDiagnostics", i->GetFunc());
+			return IntrinsicResult(DynamicMap(info));
+		});
+		raylibModule.SetValue("GetVideoFrameTimingDiagnostics", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("keepSeededHeaders", Value(1));
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("keepSeededHeaders", Value(1));
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
-		int keepSeededHeaders = context->GetVar(String("keepSeededHeaders")).IntValue();
+		int keepSeededHeaders = context.GetVar(String("keepSeededHeaders")).IntValue();
 
 #ifndef PLATFORM_WEB
 		if (!state->webPlayer) {
@@ -3463,44 +3462,44 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		info.SetValue(String("message"), Value(String(message)));
 		info.SetValue(String("resetApplied"), Value(1));
 		info.SetValue(String("keptSeededHeaders"), Value(keepSeededHeaders != 0 ? 1 : 0));
-		return IntrinsicResult(Value(info));
-	};
-	raylibModule.SetValue("ResetVideoAudioDecodeSession", i->GetFunc());
+		return IntrinsicResult(DynamicMap(info));
+	});
+	raylibModule.SetValue("ResetVideoAudioDecodeSession", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("enabled", Value(1));
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("enabled", Value(1));
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
-		int enabled = context->GetVar(String("enabled")).IntValue();
+		int enabled = context.GetVar(String("enabled")).IntValue();
 		state->looping = (enabled != 0);
 #ifdef PLATFORM_WEB
 		if (state->webPlayer) WebVideoSetLooping(state->webHandle, state->looping ? 1 : 0);
 #endif
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("SetVideoLooping", i->GetFunc());
+	});
+	raylibModule.SetValue("SetVideoLooping", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 #ifdef PLATFORM_WEB
 		if (state->webPlayer) state->looping = (WebVideoGetLooping(state->webHandle) != 0);
 #endif
 		return IntrinsicResult(state->looping ? 1 : 0);
-	};
-	raylibModule.SetValue("GetVideoLooping", i->GetFunc());
+	});
+	raylibModule.SetValue("GetVideoLooping", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->AddParam("rate", Value(1.0));
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.AddParam("rate", Value(1.0));
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
-		double rate = context->GetVar(String("rate")).DoubleValue();
+		double rate = context.GetVar(String("rate")).DoubleValue();
 		if (rate < 0.05) rate = 0.05;
 		if (rate > 4.0) rate = 4.0;
 		state->playBaseTime = state->timePlayed;
@@ -3510,58 +3509,58 @@ void AddRVideoMethods(ValueDict raylibModule) {
 		if (state->webPlayer) WebVideoSetPlaybackRate(state->webHandle, rate);
 #endif
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("SetVideoPlaybackRate", i->GetFunc());
+	});
+	raylibModule.SetValue("SetVideoPlaybackRate", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 #ifdef PLATFORM_WEB
 		if (state->webPlayer) state->playbackRate = WebVideoGetPlaybackRate(state->webHandle);
 #endif
 		return IntrinsicResult(state->playbackRate);
-	};
-	raylibModule.SetValue("GetVideoPlaybackRate", i->GetFunc());
+	});
+	raylibModule.SetValue("GetVideoPlaybackRate", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		int raised = state->loopEventPending ? 1 : 0;
 		state->loopEventPending = false;
 		return IntrinsicResult(raised);
-	};
-	raylibModule.SetValue("DidVideoLoop", i->GetFunc());
+	});
+	raylibModule.SetValue("DidVideoLoop", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context->GetVar(String("video")));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(context.GetVar(String("video")));
 		if (!state || !state->valid) return IntrinsicResult::Null;
 		int raised = state->finishEventPending ? 1 : 0;
 		state->finishEventPending = false;
 		return IntrinsicResult(raised);
-	};
-	raylibModule.SetValue("DidVideoFinish", i->GetFunc());
+	});
+	raylibModule.SetValue("DidVideoFinish", i.GetFunc());
 
 	i = Intrinsic::Create("");
-	i->AddParam("video");
-	i->code = INTRINSIC_LAMBDA {
-		Value videoVal = context->GetVar(String("video"));
+	i.AddParam("video");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value videoVal = context.GetVar(String("video"));
 		VideoPlayerState* state = (VideoPlayerState*)ValueToVideoPlayerHandle(videoVal);
 		if (!state) return IntrinsicResult::Null;
 		FreeVideoMapTextureHandle(videoVal);
 		DestroyVideoPlayer(state);
-		if (videoVal.type == ValueType::Map) {
+		if (videoVal.Type() == ValueType::Map) {
 			ValueDict map = videoVal.GetDict();
 			map.SetValue(String("_handle"), Value::zero);
 			map.SetValue(String("isPlaying"), Value::zero);
 			map.SetValue(String("isFinished"), Value(1));
 		}
 		return IntrinsicResult::Null;
-	};
-	raylibModule.SetValue("UnloadVideoStream", i->GetFunc());
+	});
+	raylibModule.SetValue("UnloadVideoStream", i.GetFunc());
 }
