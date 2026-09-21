@@ -7,6 +7,7 @@
 #include "miniscript.h"
 #include "macros.h"
 #include <vector>
+#include <cstring>
 
 using namespace MiniScript;
 
@@ -734,6 +735,58 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("GetModelBoundingBox", i.GetFunc());
 
+	// GetModelBoneCount/GetModelBoneName/GetModelBoneParent/GetModelBoneMatrix:
+	// expose model.skeleton (bone names/hierarchy) and the live, already-
+	// skinned model.boneMatrices -- previously entirely unreachable from
+	// script. Without these there was no way to find a bone by name or read
+	// its current transform, which blocks the standard "attach a prop/weapon
+	// to a character's hand bone" pattern and any custom procedural/IK
+	// animation.
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr) return IntrinsicResult::Null;
+		return IntrinsicResult(modelPtr->skeleton.boneCount);
+	});
+	raylibModule.SetValue("GetModelBoneCount", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr || modelPtr->skeleton.bones == nullptr) return IntrinsicResult::Null;
+		int index = context.GetArg(1).IntValue();
+		if (index < 0 || index >= modelPtr->skeleton.boneCount) return IntrinsicResult::Null;
+		return IntrinsicResult(String(modelPtr->skeleton.bones[index].name));
+	});
+	raylibModule.SetValue("GetModelBoneName", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr || modelPtr->skeleton.bones == nullptr) return IntrinsicResult::Null;
+		int index = context.GetArg(1).IntValue();
+		if (index < 0 || index >= modelPtr->skeleton.boneCount) return IntrinsicResult::Null;
+		return IntrinsicResult(modelPtr->skeleton.bones[index].parent);
+	});
+	raylibModule.SetValue("GetModelBoneParent", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr || modelPtr->boneMatrices == nullptr) return IntrinsicResult::Null;
+		int index = context.GetArg(1).IntValue();
+		if (index < 0 || index >= modelPtr->skeleton.boneCount) return IntrinsicResult::Null;
+		return IntrinsicResult(MatrixToValue(modelPtr->boneMatrices[index]));
+	});
+	raylibModule.SetValue("GetModelBoneMatrix", i.GetFunc());
+
 	// Model drawing
 
 	i = Intrinsic::Create("");
@@ -864,6 +917,46 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 		return IntrinsicResult::Null;
 	});
 	raylibModule.SetValue("UpdateMeshBuffer", i.GetFunc());
+
+	// GetMeshBuffer: read-side counterpart to UpdateMeshBuffer above. Copies
+	// one of the mesh's CPU-side attribute arrays (same 0-8 buffer-index
+	// convention UpdateMeshBuffer already uses) out as a RawData value, so a
+	// script can inspect geometry it generated or loaded -- e.g. verify a
+	// GenMeshHeightmap result, export a loaded model's vertices, or read back
+	// a mesh's collision-relevant data -- none of which was previously
+	// possible; the buffers could only be written, never read.
+	i = Intrinsic::Create("");
+	i.AddParam("mesh");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Mesh* meshPtr = GetMeshPtr(context.GetArg(0));
+		if (meshPtr == nullptr) return IntrinsicResult::Null;
+
+		int index = context.GetArg(1).IntValue();
+		const void* src = nullptr;
+		size_t byteSize = 0;
+
+		switch (index) {
+			case 0: src = meshPtr->vertices; byteSize = (size_t)meshPtr->vertexCount * 3 * sizeof(float); break;
+			case 1: src = meshPtr->texcoords; byteSize = (size_t)meshPtr->vertexCount * 2 * sizeof(float); break;
+			case 2: src = meshPtr->normals; byteSize = (size_t)meshPtr->vertexCount * 3 * sizeof(float); break;
+			case 3: src = meshPtr->colors; byteSize = (size_t)meshPtr->vertexCount * 4 * sizeof(unsigned char); break;
+			case 4: src = meshPtr->tangents; byteSize = (size_t)meshPtr->vertexCount * 4 * sizeof(float); break;
+			case 5: src = meshPtr->texcoords2; byteSize = (size_t)meshPtr->vertexCount * 2 * sizeof(float); break;
+			case 6: src = meshPtr->indices; byteSize = (size_t)meshPtr->triangleCount * 3 * sizeof(unsigned short); break;
+			case 7: src = meshPtr->boneIndices; byteSize = (size_t)meshPtr->vertexCount * 4 * sizeof(unsigned char); break;
+			case 8: src = meshPtr->boneWeights; byteSize = (size_t)meshPtr->vertexCount * 4 * sizeof(float); break;
+			default: return IntrinsicResult::Null;
+		}
+
+		if (src == nullptr || byteSize == 0) return IntrinsicResult::Null;
+
+		unsigned char* copy = (unsigned char*)malloc(byteSize);
+		memcpy(copy, src, byteSize);
+		BinaryData* rawData = new BinaryData(copy, (int)byteSize, true);
+		return IntrinsicResult(RawDataToValue(rawData));
+	});
+	raylibModule.SetValue("GetMeshBuffer", i.GetFunc());
 
 	i = Intrinsic::Create("");
 	i.AddParam("mesh");
@@ -1181,6 +1274,77 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("SetMaterialTexture", i.GetFunc());
 
+	// GetMaterialTexture/GetMaterialColor/SetMaterialColor/GetMaterialValue/
+	// SetMaterialValue: read-side (and, for color/value, the only side)
+	// access to a MaterialMap slot. SetMaterialTexture above could assign a
+	// texture but a script could never read back what was currently bound;
+	// maps[].color (a per-slot tint, e.g. for team-color/damage-flash
+	// effects) and maps[].value (a scalar, e.g. roughness/metalness for a
+	// PBR map) had no accessor at all.
+	i = Intrinsic::Create("");
+	i.AddParam("material");
+	i.AddParam("mapType");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Material* materialPtr = GetMaterialPtr(context.GetArg(0));
+		if (materialPtr == nullptr || materialPtr->maps == nullptr) return IntrinsicResult::Null;
+
+		int mapType = context.GetArg(1).IntValue();
+		return IntrinsicResult(TextureToValue(materialPtr->maps[mapType].texture));
+	});
+	raylibModule.SetValue("GetMaterialTexture", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("material");
+	i.AddParam("mapType");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Material* materialPtr = GetMaterialPtr(context.GetArg(0));
+		if (materialPtr == nullptr || materialPtr->maps == nullptr) return IntrinsicResult::Null;
+
+		int mapType = context.GetArg(1).IntValue();
+		return IntrinsicResult(ColorToValue(materialPtr->maps[mapType].color));
+	});
+	raylibModule.SetValue("GetMaterialColor", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("material");
+	i.AddParam("mapType");
+	i.AddParam("color");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Material* materialPtr = GetMaterialPtr(context.GetArg(0));
+		if (materialPtr == nullptr || materialPtr->maps == nullptr) return IntrinsicResult::Null;
+
+		int mapType = context.GetArg(1).IntValue();
+		materialPtr->maps[mapType].color = ValueToColor(context.GetArg(2));
+		return IntrinsicResult::Null;
+	});
+	raylibModule.SetValue("SetMaterialColor", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("material");
+	i.AddParam("mapType");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Material* materialPtr = GetMaterialPtr(context.GetArg(0));
+		if (materialPtr == nullptr || materialPtr->maps == nullptr) return IntrinsicResult::Null;
+
+		int mapType = context.GetArg(1).IntValue();
+		return IntrinsicResult(materialPtr->maps[mapType].value);
+	});
+	raylibModule.SetValue("GetMaterialValue", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("material");
+	i.AddParam("mapType");
+	i.AddParam("value");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Material* materialPtr = GetMaterialPtr(context.GetArg(0));
+		if (materialPtr == nullptr || materialPtr->maps == nullptr) return IntrinsicResult::Null;
+
+		int mapType = context.GetArg(1).IntValue();
+		materialPtr->maps[mapType].value = context.GetArg(2).FloatValue();
+		return IntrinsicResult::Null;
+	});
+	raylibModule.SetValue("SetMaterialValue", i.GetFunc());
+
 	i = Intrinsic::Create("");
 	i.AddParam("material");
 	i.set_Code(INTRINSIC_LAMBDA {
@@ -1376,6 +1540,66 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("SetModelMeshMaterial", i.GetFunc());
 
+	// GetModelMesh / GetModelMaterial: expose a loaded Model's internal
+	// meshes[]/materials[] arrays as ordinary, independently-usable Mesh/
+	// Material values -- the same values GenMesh*/LoadMaterialDefault
+	// already return, via the SAME MeshToValue/MaterialToValue conversion
+	// those use. Closes a real gap: previously a Model's mesh/material data
+	// was reachable only through DrawModel, which (a) cannot receive a
+	// custom material -- there is no script-level way to reach or replace
+	// model.materials[0] otherwise -- and (b) does not honor a shader bound
+	// via BeginShaderMode/EndShaderMode (DrawModel/DrawMesh always bind
+	// material.shader directly; only DrawMesh with an EXPLICIT material
+	// argument lets a script attach a custom shader, e.g. a fog/distance-fade
+	// shader, to imported geometry at all). With these two, an imported
+	// .obj's own mesh/material can be pulled out once at load time,
+	// SetMaterialShader'd, and drawn via the ordinary DrawMesh(mesh,
+	// material, transform) path exactly like a GenMeshCube-based surface --
+	// letting real, non-primitive geometry participate in a custom-shaded
+	// scene for the first time.
+	//
+	// SHALLOW COPY CAVEAT (same as LoadModelFromMesh's own docstring: "get a
+	// copy of mesh pointing to same data as original version... be
+	// careful!"): the returned Mesh/Material value wraps a NEW heap struct,
+	// but that struct's own internal pointers (the mesh's GPU vertex
+	// buffers/VAO id; the material's texture maps and shader) are a shallow
+	// copy -- they point at the SAME underlying GPU resources the source
+	// Model owns, not independent copies. Safe to DrawMesh with for as long
+	// as the source Model is still alive. Do NOT call UnloadMesh/
+	// UnloadMaterial on a value obtained this way -- that frees the shared
+	// GPU resources out from under the model that still thinks it owns
+	// them (a double-free once the model itself is later unloaded, or a
+	// use-after-free if the model is drawn again first). The intended
+	// lifecycle is: load the model once, extract what you need via these
+	// two calls, keep the model alive (or leak it, same as this project's
+	// own wall/floor/door materials already do) for as long as the
+	// extracted mesh/material are still in use.
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr) return IntrinsicResult::Null;
+		int index = context.GetArg(1).IntValue();
+		if (index < 0 || index >= modelPtr->meshCount) return IntrinsicResult::Null;
+		rcMesh++;
+		return IntrinsicResult(MeshToValue(modelPtr->meshes[index]));
+	});
+	raylibModule.SetValue("GetModelMesh", i.GetFunc());
+
+	i = Intrinsic::Create("");
+	i.AddParam("model");
+	i.AddParam("index");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Model* modelPtr = GetModelPtr(context.GetArg(0));
+		if (modelPtr == nullptr) return IntrinsicResult::Null;
+		int index = context.GetArg(1).IntValue();
+		if (index < 0 || index >= modelPtr->materialCount) return IntrinsicResult::Null;
+		rcMaterial++;
+		return IntrinsicResult(MaterialToValue(modelPtr->materials[index]));
+	});
+	raylibModule.SetValue("GetModelMaterial", i.GetFunc());
+
 	// Model animations
 
 	i = Intrinsic::Create("");
@@ -1395,6 +1619,33 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 		return IntrinsicResult(DynamicList(result));
 	});
 	raylibModule.SetValue("LoadModelAnimations", i.GetFunc());
+
+	// GetAnimationFramePose: read a specific animation's own keyframe pose
+	// for one bone at one frame, as {translation, rotation, scale}. Lets a
+	// script inspect or sample an animation's raw data directly rather than
+	// only ever pushing it through UpdateModelAnimation.
+	i = Intrinsic::Create("");
+	i.AddParam("animation");
+	i.AddParam("frame");
+	i.AddParam("boneIndex");
+	i.set_Code(INTRINSIC_LAMBDA {
+		Value animValue = context.GetArg(0);
+		ModelAnimation animation = ValueToModelAnimation(animValue);
+		if (animation.keyframePoses == nullptr) return IntrinsicResult::Null;
+
+		int frame = context.GetArg(1).IntValue();
+		int boneIndex = context.GetArg(2).IntValue();
+		if (frame < 0 || frame >= animation.keyframeCount) return IntrinsicResult::Null;
+		if (boneIndex < 0 || boneIndex >= animation.boneCount) return IntrinsicResult::Null;
+
+		Transform pose = animation.keyframePoses[frame][boneIndex];
+		ValueDict result;
+		result.SetValue(String("translation"), Vector3ToValue(pose.translation));
+		result.SetValue(String("rotation"), QuaternionToValue(pose.rotation));
+		result.SetValue(String("scale"), Vector3ToValue(pose.scale));
+		return IntrinsicResult(DynamicMap(result));
+	});
+	raylibModule.SetValue("GetAnimationFramePose", i.GetFunc());
 
 	i = Intrinsic::Create("");
 	i.AddParam("model");

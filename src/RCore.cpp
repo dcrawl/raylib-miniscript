@@ -721,26 +721,6 @@ static void MiniScriptTraceLogBridge(int logLevel, const char* text, va_list arg
 void AddRCoreMethods(ValueDict& raylibModule) {
 	Intrinsic i;
 
-	// Forces an immediate, unconditional full mark-sweep collection,
-	// bypassing GCManager::MaybeCollect's own tick-based throttle entirely.
-	// Exists for two reasons: (1) a script about to do something memory-
-	// heavy (a level transition, a big batch load) can ask for a clean
-	// slate on its own schedule rather than hoping the ambient per-frame
-	// tick happens to line up; (2) diagnostics -- MaybeCollect's throttle
-	// is driven by the HOST's own per-frame tick (main.cpp's MainLoop, see
-	// its own comment), which a script that never returns control to that
-	// outer loop (e.g. one long call to a child Interp's runUntilDone)
-	// never advances, making it otherwise impossible to tell, from script,
-	// whether a suspected leak is a real GC bug or just an un-collected
-	// backlog.
-	// This is a utility function to help diagnose memory issues.
-	i = Intrinsic::Create("");
-	i.set_Code(INTRINSIC_LAMBDA {
-		GCManager::CollectGarbage();
-		return IntrinsicResult::Null;
-	});
-	raylibModule.SetValue("CollectGarbage", i.GetFunc());
-
 	// Drawing-related functions
 
 	i = Intrinsic::Create("");
