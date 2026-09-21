@@ -33,6 +33,7 @@ const Value& MaterialClass();
 const Value& ModelClass();
 const Value& ModelAnimationClass();
 const Value& Camera3DClass();
+const Value& VideoPlayerClass();
 
 // Install the above classes into the given (raylib) module map
 void AddTypeClasses(ValueDict& raylibModule);
@@ -211,6 +212,16 @@ inline Value PointerToValue(void* ptr) {
 inline void* ValueToPointer(Value v) {
 	return (void*)(intptr_t)v.DoubleValue();
 }
+
+// Convert a video player handle and texture metadata to a MiniScript map
+Value VideoPlayerToValue(void* playerHandle, Texture texture, int width, int height, int frameCount, double frameRate, double timeLength);
+
+// Extract raw video player handle pointer from a MiniScript map
+void* ValueToVideoPlayerHandle(Value value);
+
+// Update mutable playback state values on a VideoPlayer map
+void UpdateVideoPlayerStateValue(Value value, int currentFrame, double timePlayed, int isPlaying, int isFinished);
+
 
 // Resource allocation counters (for leak detection by MiniScript users)
 extern int rcImage;

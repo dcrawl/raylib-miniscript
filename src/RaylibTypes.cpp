@@ -64,6 +64,25 @@ const Value& FontClass() {
 	return classValue;
 }
 
+const Value& VideoPlayerClass() {
+	static ValueDict map;
+	if (map.Count() == 0) {
+		map.SetValue(String("_handle"), Value::zero);
+		map.SetValue(String("texture"), Value::null);
+		map.SetValue(String("width"), Value::zero);
+		map.SetValue(String("height"), Value::zero);
+		map.SetValue(String("frameCount"), Value::zero);
+		map.SetValue(String("frameRate"), Value::zero);
+		map.SetValue(String("currentFrame"), Value::zero);
+		map.SetValue(String("timeLength"), Value::zero);
+		map.SetValue(String("timePlayed"), Value::zero);
+		map.SetValue(String("isPlaying"), Value::zero);
+		map.SetValue(String("isFinished"), Value::zero);
+	}
+	return map;
+}
+
+
 const Value& WaveClass() {
 	static Value classValue;
 	if (classValue.IsNull()) {
@@ -469,6 +488,39 @@ Value RenderTextureToValue(RenderTexture2D renderTexture) {
 	map.SetValue(String("id"), Value((int)renderTexture.id));
 	map.SetValue(String("texture"), TextureToValue(renderTexture.texture));
 	return DynamicMap(map);
+}
+
+Value VideoPlayerToValue(void* playerHandle, Texture texture, int width, int height, int frameCount, double frameRate, double timeLength) {
+	ValueDict map;
+	map.SetValue(Value::magicIsA, VideoPlayerClass());
+	map.SetValue(String("_handle"), PointerToValue(playerHandle));
+	map.SetValue(String("texture"), TextureToValue(texture));
+	map.SetValue(String("width"), Value(width));
+	map.SetValue(String("height"), Value(height));
+	map.SetValue(String("frameCount"), Value(frameCount));
+	map.SetValue(String("frameRate"), Value(frameRate));
+	map.SetValue(String("currentFrame"), Value::zero);
+	map.SetValue(String("timeLength"), Value(timeLength));
+	map.SetValue(String("timePlayed"), Value::zero);
+	map.SetValue(String("isPlaying"), Value::zero);
+	map.SetValue(String("isFinished"), Value::zero);
+	return Value(map);
+}
+
+void* ValueToVideoPlayerHandle(Value value) {
+	if (value.type != ValueType::Map) return nullptr;
+	ValueDict map = value.GetDict();
+	Value handleVal = map.Lookup(String("_handle"), Value::zero);
+	return ValueToPointer(handleVal);
+}
+
+void UpdateVideoPlayerStateValue(Value value, int currentFrame, double timePlayed, int isPlaying, int isFinished) {
+	if (value.type != ValueType::Map) return;
+	ValueDict map = value.GetDict();
+	map.SetValue(String("currentFrame"), Value(currentFrame));
+	map.SetValue(String("timePlayed"), Value(timePlayed));
+	map.SetValue(String("isPlaying"), Value(isPlaying));
+	map.SetValue(String("isFinished"), Value(isFinished));
 }
 
 // Extract a Raylib RenderTexture2D from a MiniScript map
