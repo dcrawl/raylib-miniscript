@@ -355,22 +355,6 @@ int main(int argc, char *argv[]) {
 	MiniScript::value_init_constants();  // Value::magicIsA, selfString, etc.
 	MiniScript::ErrorTypes::Init();      // error type prototypes
 
-	// Retune MaybeCollect's default interval (60 ordinary ticks, i.e. about
-	// once per second at 60fps -- see GCManager.g.h) for this host's actual
-	// workload. That default is tuned for handle-heavy churn (file
-	// descriptors, GPU resources), where collection is relatively rare but
-	// important. A raylib game script doing per-frame math (e.g.
-	// MatrixTranslate/MatrixRotate/MatrixMultiply, each of which returns an
-	// ordinary GC map/list -- see RaylibTypes.cpp's MatrixToValue) can
-	// generate thousands of small garbage objects a frame; since
-	// MaybeCollect's throttle is purely tick/time-based, not allocation-
-	// volume-based, a full second's worth of that garbage accumulates
-	// before the first collection ever runs.
-	MiniScript::GCManager::GCIntervalTicks = 10;
-	MiniScript::GCManager::GCMinIntervalTicks = 5;
-	MiniScript::GCManager::GCEncouragedIntervalTicks = 3;
-	MiniScript::GCManager::GCEncouragedMinIntervalTicks = 1;
-
 	SetTargetFPS(60);
 	InitAudioDevice();
 
