@@ -3,5 +3,5 @@
 
 @MS_PLUGIN_DECLS@
 const MSPluginEntry kMSPlugins[] = {
-@MS_PLUGIN_ROWS@    { nullptr, nullptr, nullptr, nullptr, nullptr }
+@MS_PLUGIN_ROWS@    { nullptr, nullptr }
 };

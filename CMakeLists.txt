@@ -287,6 +287,28 @@ else()
     target_compile_options(interp_tests PRIVATE -O0 -g -Wall -DPLATFORM_DESKTOP -fexceptions)
 
     #---------------------------------------------------------------------------
+    # plugin_events_tests - src/PluginEvents.h (the plugin event queue)
+    #
+    # Needs only the MiniScript runtime.
+    #
+    #   cmake --build build --target plugin_events_tests && ./build/plugin_events_tests
+    #---------------------------------------------------------------------------
+    add_executable(plugin_events_tests EXCLUDE_FROM_ALL
+        tests/plugin_events_tests.cpp
+        ${MINISCRIPT_SOURCES}
+    )
+
+    target_include_directories(plugin_events_tests PRIVATE
+        ${CMAKE_SOURCE_DIR}/src
+        ${MS2_DIR}/cpp/core
+        ${MS2_DIR}/cpp
+        ${MS2_DIR}/generated
+    )
+
+    target_compile_options(plugin_events_tests PRIVATE -O0 -g -Wall -DPLATFORM_DESKTOP -fexceptions -pthread)
+    target_link_libraries(plugin_events_tests pthread)
+
+    #---------------------------------------------------------------------------
     # handle_tests - the native _handle fields of the raylib types
     #
     # Runs hostile scripts (forged numeric handles, wrong-type handles, use after
@@ -321,21 +343,45 @@ endif()
 # Plugins (see plugins/README.md)
 #
 # Every folder under plugins/ is compiled into the engine: its *.cpp files are
-# added to the build, and a table of its hooks is generated for src/Plugin.cpp.
+# added to the build, and a table of the plugins is generated for src/Plugin.cpp.
 # A plugin may have a plugin.cmake to add include dirs, defines, or libraries
 # (use the plain target_link_libraries(raylib-miniscript ...) form, with no
 # PRIVATE/PUBLIC, to match the rest of this file); set MS_PLUGIN_SKIP there to
 # leave the plugin out on a platform where it doesn't apply.  Plugins can also
 # be left out from the command line: -DMS_DISABLE_PLUGINS="steam;ads"
+#
+# Plugins that can't live in this repo (an SDK whose licence forbids
+# redistribution) go in another directory laid out like plugins/ -- a folder per
+# plugin -- named by -DMS_EXTRA_PLUGIN_DIRS="/path/one;/path/two" (or an
+# environment variable of the same name).  Relative paths are taken from here.
 # This block must stay after the platform sections above.
 #-------------------------------------------------------------------------------
-set(MS_DISABLE_PLUGINS "" CACHE STRING "Semicolon-separated names of plugins/ folders to leave out")
+set(MS_DISABLE_PLUGINS "" CACHE STRING "Semicolon-separated names of plugin folders to leave out")
+set(MS_EXTRA_PLUGIN_DIRS "" CACHE STRING "Semicolon-separated directories of extra plugins, laid out like plugins/")
 set(MS_PLUGIN_DECLS "")
 set(MS_PLUGIN_ROWS "")
 set(MS_PLUGIN_NAMES "")
 
-file(GLOB MS_PLUGIN_DIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true ${CMAKE_SOURCE_DIR}/plugins/*)
-list(SORT MS_PLUGIN_DIRS)
+set(MS_PLUGIN_ROOTS ${CMAKE_SOURCE_DIR}/plugins)
+set(MS_EXTRA_DIRS ${MS_EXTRA_PLUGIN_DIRS})
+if(NOT MS_EXTRA_DIRS AND DEFINED ENV{MS_EXTRA_PLUGIN_DIRS})
+    set(MS_EXTRA_DIRS $ENV{MS_EXTRA_PLUGIN_DIRS})
+endif()
+foreach(EXTRA_DIR ${MS_EXTRA_DIRS})
+    get_filename_component(EXTRA_DIR_ABS ${EXTRA_DIR} ABSOLUTE BASE_DIR ${CMAKE_SOURCE_DIR})
+    if(IS_DIRECTORY ${EXTRA_DIR_ABS})
+        list(APPEND MS_PLUGIN_ROOTS ${EXTRA_DIR_ABS})
+    else()
+        message(WARNING "MS_EXTRA_PLUGIN_DIRS: '${EXTRA_DIR}' is not a directory, ignoring")
+    endif()
+endforeach()
+
+set(MS_PLUGIN_DIRS "")
+foreach(PLUGIN_ROOT ${MS_PLUGIN_ROOTS})
+    file(GLOB ROOT_ENTRIES CONFIGURE_DEPENDS LIST_DIRECTORIES true ${PLUGIN_ROOT}/*)
+    list(SORT ROOT_ENTRIES)
+    list(APPEND MS_PLUGIN_DIRS ${ROOT_ENTRIES})
+endforeach()
 foreach(PLUGIN_DIR ${MS_PLUGIN_DIRS})
     if(NOT IS_DIRECTORY ${PLUGIN_DIR})
         continue()
@@ -348,8 +394,15 @@ foreach(PLUGIN_DIR ${MS_PLUGIN_DIRS})
         message(STATUS "Plugin '${PLUGIN_NAME}': no plugin.cpp, skipping")
         continue()
     endif()
+    if(PLUGIN_NAME STREQUAL "plugins")
+        message(FATAL_ERROR "Plugin folder '${PLUGIN_DIR}': 'plugins' is reserved for the script-visible plugin list")
+    endif()
+    if(PLUGIN_NAME IN_LIST MS_PLUGIN_NAMES OR PLUGIN_NAME IN_LIST MS_PLUGIN_SKIPPED_NAMES)
+        message(FATAL_ERROR "Plugin '${PLUGIN_NAME}' is found twice (second copy: ${PLUGIN_DIR}); plugin names must be unique")
+    endif()
     if(PLUGIN_NAME IN_LIST MS_DISABLE_PLUGINS)
         message(STATUS "Plugin '${PLUGIN_NAME}': disabled by MS_DISABLE_PLUGINS")
+        list(APPEND MS_PLUGIN_SKIPPED_NAMES ${PLUGIN_NAME})
         continue()
     endif()
 
@@ -359,31 +412,22 @@ foreach(PLUGIN_DIR ${MS_PLUGIN_DIRS})
     endif()
     if(MS_PLUGIN_SKIP)
         message(STATUS "Plugin '${PLUGIN_NAME}': skipped on this platform")
+        list(APPEND MS_PLUGIN_SKIPPED_NAMES ${PLUGIN_NAME})
         continue()
+    endif()
+
+    file(READ ${PLUGIN_DIR}/plugin.cpp PLUGIN_TEXT)
+    if(NOT PLUGIN_TEXT MATCHES "MS_PLUGIN\\(${PLUGIN_NAME}[ \t]*,")
+        message(FATAL_ERROR "Plugin '${PLUGIN_NAME}': plugin.cpp must contain MS_PLUGIN(${PLUGIN_NAME}, ...). "
+            "(To leave a plugin out on some platforms, set MS_PLUGIN_SKIP in its plugin.cmake.)")
     endif()
 
     file(GLOB PLUGIN_SOURCES CONFIGURE_DEPENDS ${PLUGIN_DIR}/*.cpp ${PLUGIN_DIR}/*.c)
     target_sources(raylib-miniscript PRIVATE ${PLUGIN_SOURCES})
     target_include_directories(raylib-miniscript PRIVATE ${PLUGIN_DIR})
 
-    # Which optional hooks does plugin.cpp define?  Look for the macro uses.
-    file(READ ${PLUGIN_DIR}/plugin.cpp PLUGIN_TEXT)
-    if(NOT PLUGIN_TEXT MATCHES "MS_PLUGIN_INIT\\(${PLUGIN_NAME}\\)")
-        message(FATAL_ERROR "Plugin '${PLUGIN_NAME}': plugin.cpp must define MS_PLUGIN_INIT(${PLUGIN_NAME})")
-    endif()
-    set(PLUGIN_ROW "    { \"${PLUGIN_NAME}\"")
-    string(APPEND MS_PLUGIN_DECLS "void MSPlugin_${PLUGIN_NAME}_Init();\n")
-    string(APPEND PLUGIN_ROW ", MSPlugin_${PLUGIN_NAME}_Init")
-    foreach(HOOK Update Reset Shutdown)
-        string(TOUPPER ${HOOK} HOOK_UPPER)
-        if(PLUGIN_TEXT MATCHES "MS_PLUGIN_${HOOK_UPPER}\\(${PLUGIN_NAME}\\)")
-            string(APPEND MS_PLUGIN_DECLS "void MSPlugin_${PLUGIN_NAME}_${HOOK}();\n")
-            string(APPEND PLUGIN_ROW ", MSPlugin_${PLUGIN_NAME}_${HOOK}")
-        else()
-            string(APPEND PLUGIN_ROW ", nullptr")
-        endif()
-    endforeach()
-    string(APPEND MS_PLUGIN_ROWS "${PLUGIN_ROW} },\n")
+    string(APPEND MS_PLUGIN_DECLS "const MSPluginHooks* MSPlugin_${PLUGIN_NAME}();\n")
+    string(APPEND MS_PLUGIN_ROWS "    { \"${PLUGIN_NAME}\", MSPlugin_${PLUGIN_NAME} },\n")
     list(APPEND MS_PLUGIN_NAMES ${PLUGIN_NAME})
 endforeach()
 

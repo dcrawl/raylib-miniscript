@@ -282,9 +282,11 @@ end function
 // Each plugin folder's .cpp files are scanned for the function that fills the
 // plugin's module map -- found by its "ValueDict& <var>)" parameter -- and the
 // module's name by its PluginAddModule<&Fill>("name") call.  A plugin's API goes
-// into its own plugins/<folder>/API.md, not into API_DOC.md, which just gets a
-// list of links (added to outLines).
-processPlugins = function(pluginsDir)
+// into its own <folder>/API.md, not into API_DOC.md, which just gets a list of
+// links (added to outLines) -- but only if inTree: a plugin from an external
+// directory (MS_EXTRA_PLUGIN_DIRS) may be private, so its path stays out of
+// the public doc.
+processPlugins = function(pluginsDir, inTree=true)
 	info = file.info(pluginsDir)
 	if not info or not info.isDirectory then return 0
 	total = 0
@@ -322,7 +324,7 @@ processPlugins = function(pluginsDir)
 		total += count
 		if count == 0 then continue
 		writePluginDoc file.child(dir, "API.md"), moduleName, pluginLines
-		links.push "- [" + moduleName + "](" + dir + "/API.md)"
+		if inTree then links.push "- [" + moduleName + "](" + dir + "/API.md)"
 	end for
 	if links then
 		outLines.push ""
@@ -386,6 +388,14 @@ totalAPIs += processBindingFile(file.child(bindingSrc, "PhysicsCore.cpp"), "phys
 
 // And the plugins (compiled in from plugins/*; each adds its own module)
 totalAPIs += processPlugins("plugins")
+
+// Plugins from outside the repo: MS_EXTRA_PLUGIN_DIRS, ";"-separated, as for CMake.
+// They get their own API.md but no link in this file.
+if env.hasIndex("MS_EXTRA_PLUGIN_DIRS") then
+	for extraDir in env.MS_EXTRA_PLUGIN_DIRS.split(";")
+		if extraDir then totalAPIs += processPlugins(extraDir, false)
+	end for
+end if
 
 print totalAPIs + " APIs processed in total"
 

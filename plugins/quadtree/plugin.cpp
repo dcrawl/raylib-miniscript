@@ -168,8 +168,11 @@ void Fill(ValueDict& m) {
 	m.SetValue(String("clear"), f.GetFunc());
 }
 
+bool Init() {
+	PluginAddModule<&Fill>("quadtree");
+	return true;
+}
+
 } // namespace
 
-MS_PLUGIN_INIT(quadtree) {
-	PluginAddModule<&Fill>("quadtree");
-}
+MS_PLUGIN(quadtree, "1.0", Init, nullptr, nullptr, nullptr)

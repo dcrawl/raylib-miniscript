@@ -13,24 +13,42 @@
 
 #include "miniscript.h"
 
-// Hooks a plugin implements.  Folder name <name> must be a valid C identifier.
-//   MS_PLUGIN_INIT      required: add intrinsics (once, at interpreter creation)
-//   MS_PLUGIN_UPDATE    optional: once per frame, on the main thread
-//   MS_PLUGIN_RESET     optional: the interpreter is about to be reset
-//   MS_PLUGIN_SHUTDOWN  optional: the app is closing
-#define MS_PLUGIN_INIT(name)     void MSPlugin_##name##_Init()
-#define MS_PLUGIN_UPDATE(name)   void MSPlugin_##name##_Update()
-#define MS_PLUGIN_RESET(name)    void MSPlugin_##name##_Reset()
-#define MS_PLUGIN_SHUTDOWN(name) void MSPlugin_##name##_Shutdown()
+// What a plugin provides, in one descriptor.  A plugin's plugin.cpp contains
+// exactly one MS_PLUGIN(...) line, naming its hooks; the preprocessor (not the
+// build system) decides which are null, so hooks may sit inside #ifdef blocks:
+//
+//     static bool Init() { ...; return true; }   // false: unavailable on this run
+//     MS_PLUGIN(steam, "1.0", Init,
+//     #ifdef PLATFORM_DESKTOP
+//         Update,
+//     #else
+//         nullptr,
+//     #endif
+//         nullptr, Shutdown)
+//
+// The folder name <name> must be a valid C identifier.
+struct MSPluginHooks {
+	const char* version;     // reported to scripts by `plugins`; "" if none
+	bool (*init)();          // required: add intrinsics, once, at interpreter creation.
+	                         //   Return false if the plugin cannot work this run (Steam
+	                         //   not running...); it is then marked unavailable, its other
+	                         //   hooks never run, and it must undo its own partial setup.
+	void (*update)();        // optional: once per frame, on the main thread
+	void (*reset)();         // optional: the interpreter is about to be reset
+	void (*shutdown)();      // optional: the app is closing
+};
 
-// One row of the generated table (build/plugin_registry.cpp).  A hook the
-// plugin does not define is null.  The table ends with a row whose name is null.
+#define MS_PLUGIN(name, version, init, update, reset, shutdown) \
+	const MSPluginHooks* MSPlugin_##name() { \
+		static const MSPluginHooks hooks = { version, init, update, reset, shutdown }; \
+		return &hooks; \
+	}
+
+// One row of the generated table (build/plugin_registry.cpp).  The table ends
+// with a row whose name is null.
 struct MSPluginEntry {
 	const char* name;
-	void (*init)();
-	void (*update)();
-	void (*reset)();
-	void (*shutdown)();
+	const MSPluginHooks* (*get)();
 };
 extern const MSPluginEntry kMSPlugins[];
 
@@ -41,10 +59,10 @@ void PluginsReset();
 void PluginsShutdown();
 
 // Make a global module (like `physicsCore`) named `name`, whose members `Fill`
-// adds to the map it is given.  Call from MS_PLUGIN_INIT:
+// adds to the map it is given.  Call from your init hook:
 //
 //     static void Fill(MiniScript::ValueDict& m) { ... m.SetValue(String("new"), f.GetFunc()); }
-//     MS_PLUGIN_INIT(quadtree) { PluginAddModule<&Fill>("quadtree"); }
+//     static bool Init() { PluginAddModule<&Fill>("quadtree"); return true; }
 //
 // Registering under its own name keeps a plugin from clobbering core intrinsics.
 template<void (*Fill)(MiniScript::ValueDict&)>

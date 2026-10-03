@@ -24,6 +24,12 @@ sameSet = function(a, b)
 	return a.sort == b.sort
 end function
 
+// The plugin list
+ok plugins.hasIndex("quadtree"), "plugins lists quadtree"
+eq plugins.quadtree.loaded, 1, "plugins.quadtree.loaded"
+eq plugins.quadtree.version, "1.0", "plugins.quadtree.version"
+ok not plugins.hasIndex("no_such_plugin"), "plugins does not list unknown plugins"
+
 // create / count / insert
 t = quadtree.create(0, 0, 100, 100)
 eq quadtree.count(t), 0, "new tree is empty"
