@@ -96,6 +96,7 @@ Quadtree* TreeArg(Context context, const char* fn, Value& err) {
 void Fill(ValueDict& m) {
 	Intrinsic f;
 
+	// Create a new quadtree covering the rectangle x, y, width, height; returns the tree
 	f = Intrinsic::Create("");
 	f.AddParam("x", Value(0));
 	f.AddParam("y", Value(0));
@@ -109,7 +110,7 @@ void Fill(ValueDict& m) {
 	});
 	m.SetValue(String("create"), f.GetFunc());
 
-	// Returns 1 if the point was inside the tree's bounds and stored, else 0.
+	// Add a point with the given id (any number) to the tree; returns 1 if the point was stored, 0 if outside the tree's bounds
 	f = Intrinsic::Create("");
 	f.AddParam("tree");
 	f.AddParam("id");
@@ -124,6 +125,7 @@ void Fill(ValueDict& m) {
 	});
 	m.SetValue(String("insert"), f.GetFunc());
 
+	// Return a list of the ids of all points inside the rectangle x, y, width, height
 	f = Intrinsic::Create("");
 	f.AddParam("tree");
 	f.AddParam("x");
@@ -141,6 +143,7 @@ void Fill(ValueDict& m) {
 	});
 	m.SetValue(String("query"), f.GetFunc());
 
+	// Return the number of points stored in the tree
 	f = Intrinsic::Create("");
 	f.AddParam("tree");
 	f.set_Code(INTRINSIC_LAMBDA {
@@ -151,6 +154,7 @@ void Fill(ValueDict& m) {
 	});
 	m.SetValue(String("count"), f.GetFunc());
 
+	// Remove all points from the tree, keeping its bounds
 	f = Intrinsic::Create("");
 	f.AddParam("tree");
 	f.set_Code(INTRINSIC_LAMBDA {

@@ -247,6 +247,95 @@ processGlobalIntrinsicsFile = function(path, heading="Global Intrinsics")
 	return apiCount
 end function
 
+// Markers fencing the generated part of a plugin's API.md.  Anything the plugin
+// author writes outside them (setup notes, caveats, examples) survives a rerun.
+pluginBeginMarker = "<!-- BEGIN GENERATED API (scripts/gen_doc.ms; edits between the markers are lost) -->"
+pluginEndMarker = "<!-- END GENERATED API -->"
+
+// Write lines (the generated table) into the plugin's API.md between the
+// markers.  A new file also gets a title.  An existing file keeps everything
+// outside the markers; one with no markers is left alone, since we can't tell
+// which part is ours.
+writePluginDoc = function(path, name, lines)
+	block = [pluginBeginMarker] + lines + [pluginEndMarker]
+	if not file.info(path) then
+		file.writeLines path, ["# " + name + " plugin", ""] + block
+		print "   wrote " + path
+		return
+	end if
+	old = file.readLines(path)
+	first = null
+	last = null
+	for i in old.indexes
+		if first == null and old[i].startsWith("<!-- BEGIN GENERATED API") then first = i
+		if old[i].startsWith("<!-- END GENERATED API") then last = i
+	end for
+	if first == null or last == null or last < first then
+		print "   " + path + " has no BEGIN/END GENERATED API markers; left unchanged"
+		return
+	end if
+	file.writeLines path, old[:first] + block + old[last+1:]
+	print "   updated " + path
+end function
+
+// Process the plugins under plugins/ (compile-time plugins; see plugins/README.md).
+// Each plugin folder's .cpp files are scanned for the function that fills the
+// plugin's module map -- found by its "ValueDict& <var>)" parameter -- and the
+// module's name by its PluginAddModule<&Fill>("name") call.  A plugin's API goes
+// into its own plugins/<folder>/API.md, not into API_DOC.md, which just gets a
+// list of links (added to outLines).
+processPlugins = function(pluginsDir)
+	info = file.info(pluginsDir)
+	if not info or not info.isDirectory then return 0
+	total = 0
+	links = []
+	for folder in file.children(pluginsDir).sort
+		dir = file.child(pluginsDir, folder)
+		dirInfo = file.info(dir)
+		if not dirInfo or not dirInfo.isDirectory then continue
+		moduleName = folder
+		fillFiles = {}   // path -> name of the map variable its fill function takes
+		for child in file.children(dir).sort
+			if child[-4:] != ".cpp" then continue
+			path = file.child(dir, child)
+			for line in file.readLines(path)
+				line = line.trim
+				m = line.match("PluginAddModule<&{fn}>(""{name}"");")
+				if m then moduleName = m.name
+				m = line.match("{pre}ValueDict& {var})")
+				if m and not m.pre.contains("=") then fillFiles[path] = m.var
+			end for
+		end for
+		if not fillFiles then
+			print "Plugin " + folder + ": no function filling a ValueDict& found, skipping"
+			continue
+		end if
+		// processBindingFile appends to outLines; collect this plugin's output separately.
+		mainLines = outLines
+		outer.outLines = []
+		count = 0
+		for kv in fillFiles
+			count += processBindingFile(kv.key, kv.value, moduleName)
+		end for
+		pluginLines = outLines
+		outer.outLines = mainLines
+		total += count
+		if count == 0 then continue
+		writePluginDoc file.child(dir, "API.md"), moduleName, pluginLines
+		links.push "- [" + moduleName + "](" + dir + "/API.md)"
+	end for
+	if links then
+		outLines.push ""
+		outLines.push "## Plugins"
+		outLines.push ""
+		outLines.push "Each plugin documents its own API, in an API.md next to its source."
+		outLines.push ""
+		for link in links
+			outLines.push link
+		end for
+	end if
+	return total
+end function
 
 // Begin by verifying that we can access the files we need.
 raylibSrc = file.child("raylib", "src")
@@ -294,6 +383,9 @@ totalAPIs += processBindingFile(file.child(bindingSrc, "HttpModule.cpp"), "httpM
 totalAPIs += processBindingFile(file.child(bindingSrc, "RawData.cpp"), "rawDataClass", "RawData")
 totalAPIs += processBindingFile(file.child(bindingSrc, "MatrixClass.cpp"), "matrixClass", "Matrix")
 totalAPIs += processBindingFile(file.child(bindingSrc, "PhysicsCore.cpp"), "physicsModule", "physicsCore")
+
+// And the plugins (compiled in from plugins/*; each adds its own module)
+totalAPIs += processPlugins("plugins")
 
 print totalAPIs + " APIs processed in total"
 

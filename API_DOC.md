@@ -1099,3 +1099,9 @@
 |findPairs |**shapes**, **invMass**, **margin**=0, **pairs** |Find the pairs of shapes whose bounding boxes overlap and that may collide |
 |solveContacts |**contacts**, **pos**, **vel**, **invMass**, **dt**, **iterations**=10, **biasFactor**=0.2, **slop**=0.5, **restThreshold**=30 |Solve contact impulses for one step, updating vel and the contacts' ColPn/ColPt in place |
 |collidePairs |**pairs**, **shapes**, **verts**, **margin**=0, **prevContacts**, **contacts** |Collide shape pairs into a contact matrix (one row per point), warm-started from prevContacts |
+
+## Plugins
+
+Each plugin documents its own API, in an API.md next to its source.
+
+- [quadtree](plugins/quadtree/API.md)

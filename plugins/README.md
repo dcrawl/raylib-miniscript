@@ -45,6 +45,17 @@ endif()
 
 Leave plugins out of a build with `-DMS_DISABLE_PLUGINS="mything;other"`.
 
+## Documenting your plugin
+
+`scripts/gen_doc.ms` writes your plugin's API into `plugins/<name>/API.md` (and adds a link
+to it in `API_DOC.md`).  It finds your functions from the `SetValue(String("fn"), f.GetFunc())`
+lines in the function you pass to `PluginAddModule`, so keep that shape.  The "Purpose" column
+comes from the comment directly above each `Intrinsic::Create`.
+
+The generated table sits between `<!-- BEGIN GENERATED API -->` and `<!-- END GENERATED API -->`
+markers.  Write your own notes (setup, caveats, examples) anywhere outside them: reruns replace
+only what is between the markers.  Run it from the repo root: `./build/raylib-miniscript scripts/gen_doc.ms`.
+
 ## Guidance
 
 - Register under your own module name (`PluginAddModule`), so you can't clobber core intrinsics.
