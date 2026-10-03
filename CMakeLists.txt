@@ -316,3 +316,79 @@ else()
         $<TARGET_PROPERTY:raylib-miniscript,LINK_LIBRARIES>
     )
 endif()
+
+#-------------------------------------------------------------------------------
+# Plugins (see plugins/README.md)
+#
+# Every folder under plugins/ is compiled into the engine: its *.cpp files are
+# added to the build, and a table of its hooks is generated for src/Plugin.cpp.
+# A plugin may have a plugin.cmake to add include dirs, defines, or libraries
+# (use the plain target_link_libraries(raylib-miniscript ...) form, with no
+# PRIVATE/PUBLIC, to match the rest of this file); set MS_PLUGIN_SKIP there to
+# leave the plugin out on a platform where it doesn't apply.  Plugins can also
+# be left out from the command line: -DMS_DISABLE_PLUGINS="steam;ads"
+# This block must stay after the platform sections above.
+#-------------------------------------------------------------------------------
+set(MS_DISABLE_PLUGINS "" CACHE STRING "Semicolon-separated names of plugins/ folders to leave out")
+set(MS_PLUGIN_DECLS "")
+set(MS_PLUGIN_ROWS "")
+set(MS_PLUGIN_NAMES "")
+
+file(GLOB MS_PLUGIN_DIRS CONFIGURE_DEPENDS LIST_DIRECTORIES true ${CMAKE_SOURCE_DIR}/plugins/*)
+list(SORT MS_PLUGIN_DIRS)
+foreach(PLUGIN_DIR ${MS_PLUGIN_DIRS})
+    if(NOT IS_DIRECTORY ${PLUGIN_DIR})
+        continue()
+    endif()
+    get_filename_component(PLUGIN_NAME ${PLUGIN_DIR} NAME)
+    if(NOT PLUGIN_NAME MATCHES "^[A-Za-z_][A-Za-z0-9_]*$")
+        message(FATAL_ERROR "Plugin folder '${PLUGIN_NAME}' must be a valid C identifier")
+    endif()
+    if(NOT EXISTS ${PLUGIN_DIR}/plugin.cpp)
+        message(STATUS "Plugin '${PLUGIN_NAME}': no plugin.cpp, skipping")
+        continue()
+    endif()
+    if(PLUGIN_NAME IN_LIST MS_DISABLE_PLUGINS)
+        message(STATUS "Plugin '${PLUGIN_NAME}': disabled by MS_DISABLE_PLUGINS")
+        continue()
+    endif()
+
+    set(MS_PLUGIN_SKIP FALSE)
+    if(EXISTS ${PLUGIN_DIR}/plugin.cmake)
+        include(${PLUGIN_DIR}/plugin.cmake)   # sees PLUGIN_NAME and PLUGIN_DIR
+    endif()
+    if(MS_PLUGIN_SKIP)
+        message(STATUS "Plugin '${PLUGIN_NAME}': skipped on this platform")
+        continue()
+    endif()
+
+    file(GLOB PLUGIN_SOURCES CONFIGURE_DEPENDS ${PLUGIN_DIR}/*.cpp ${PLUGIN_DIR}/*.c)
+    target_sources(raylib-miniscript PRIVATE ${PLUGIN_SOURCES})
+    target_include_directories(raylib-miniscript PRIVATE ${PLUGIN_DIR})
+
+    # Which optional hooks does plugin.cpp define?  Look for the macro uses.
+    file(READ ${PLUGIN_DIR}/plugin.cpp PLUGIN_TEXT)
+    if(NOT PLUGIN_TEXT MATCHES "MS_PLUGIN_INIT\\(${PLUGIN_NAME}\\)")
+        message(FATAL_ERROR "Plugin '${PLUGIN_NAME}': plugin.cpp must define MS_PLUGIN_INIT(${PLUGIN_NAME})")
+    endif()
+    set(PLUGIN_ROW "    { \"${PLUGIN_NAME}\"")
+    string(APPEND MS_PLUGIN_DECLS "void MSPlugin_${PLUGIN_NAME}_Init();\n")
+    string(APPEND PLUGIN_ROW ", MSPlugin_${PLUGIN_NAME}_Init")
+    foreach(HOOK Update Reset Shutdown)
+        string(TOUPPER ${HOOK} HOOK_UPPER)
+        if(PLUGIN_TEXT MATCHES "MS_PLUGIN_${HOOK_UPPER}\\(${PLUGIN_NAME}\\)")
+            string(APPEND MS_PLUGIN_DECLS "void MSPlugin_${PLUGIN_NAME}_${HOOK}();\n")
+            string(APPEND PLUGIN_ROW ", MSPlugin_${PLUGIN_NAME}_${HOOK}")
+        else()
+            string(APPEND PLUGIN_ROW ", nullptr")
+        endif()
+    endforeach()
+    string(APPEND MS_PLUGIN_ROWS "${PLUGIN_ROW} },\n")
+    list(APPEND MS_PLUGIN_NAMES ${PLUGIN_NAME})
+endforeach()
+
+configure_file(${CMAKE_SOURCE_DIR}/cmake/plugin_registry.cpp.in
+               ${CMAKE_BINARY_DIR}/plugin_registry.cpp @ONLY)
+target_sources(raylib-miniscript PRIVATE src/Plugin.cpp ${CMAKE_BINARY_DIR}/plugin_registry.cpp)
+target_include_directories(raylib-miniscript PRIVATE ${CMAKE_SOURCE_DIR}/src)
+message(STATUS "Plugins: ${MS_PLUGIN_NAMES}")
