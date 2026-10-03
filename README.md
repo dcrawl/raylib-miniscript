@@ -41,6 +41,11 @@ Design notes for the larger additions live in [notes/](notes/): `MATRIX_DESIGN.m
 
 Native raylib objects (images, textures, fonts, sounds, models, and so on) are exposed to script as maps whose `_handle` field is an opaque handle.  Scripts can't forge a handle from a number, and a handle of the wrong type is rejected.  Resources are still released explicitly with the matching `Unload*` call; after that, every copy of the object is dead, and using it is a harmless no-op.
 
+Some calls take ownership of what you pass them, so don't unload those separately:
+- `MakeFont` copies the glyph images it is given (release your own with `UnloadFontData`) and takes ownership of the texture; use the Font's `.texture` afterward.
+- `LoadModelFromMesh` takes ownership of the mesh; `UnloadModel` frees it.
+- `UnloadMaterial` also unloads the shader and texture maps set on the material.
+
 ## Tests
 
 Headless C++ tests live in `tests/`.  Build and run them via CMake, e.g.:

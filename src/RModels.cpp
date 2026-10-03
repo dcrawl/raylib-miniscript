@@ -679,9 +679,14 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	i = Intrinsic::Create("");
 	i.AddParam("mesh");
 	i.set_Code(INTRINSIC_LAMBDA {
+		// The Model takes ownership of the mesh: UnloadModel frees its vertex data.
+		// So the script's Mesh is consumed by this call (a later UnloadMesh is a no-op).
+		if (NativePtrFromMap<Mesh>(context.GetArg(0)) == nullptr) return IntrinsicResult::Null;
 		Mesh mesh = ValueToMesh(context.GetArg(0));
 		Model model = LoadModelFromMesh(mesh);
 		if (!IsModelValid(model)) return IntrinsicResult::Null;
+		TakeNative<Mesh>(context.GetArg(0));
+		rcMesh--;
 		rcModel++;
 		return IntrinsicResult(ModelToValue(model));
 	});
@@ -1134,6 +1139,8 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("IsMaterialValid", i.GetFunc());
 
+	// UnloadMaterial also unloads the material's shader and every texture map set on it
+	// (raylib behavior), so don't UnloadTexture/UnloadShader those separately.
 	i = Intrinsic::Create("");
 	i.AddParam("material");
 	i.set_Code(INTRINSIC_LAMBDA {
@@ -1147,6 +1154,8 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("UnloadMaterial", i.GetFunc());
 
+	// The material owns the texture once set: UnloadMaterial unloads it.  The previous
+	// texture is not unloaded here.
 	i = Intrinsic::Create("");
 	i.AddParam("material");
 	i.AddParam("mapType");
@@ -1175,6 +1184,7 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("GetMaterialShader", i.GetFunc());
 
+	// The material owns the shader once set: UnloadMaterial unloads it.
 	i = Intrinsic::Create("");
 	i.AddParam("material");
 	i.AddParam("shader");

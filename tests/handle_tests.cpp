@@ -232,6 +232,36 @@ static void testFontData() {
 	rcImage = before;
 }
 
+static void testFontAtlas() {
+	printf("\n-- GenImageFontAtlas / LoadModelFromMesh --\n");
+	int before = rcImage;
+	Interpreter a = run(
+		"data = raylib.LoadFileData(\"assets/Merkin.ttf\")\n"
+		"glyphs = raylib.LoadFontData(data, 16, null, 95, 0)\n"
+		"recs = []\n"
+		"for i in range(1, glyphs.len)\n"
+		"  recs.push {\"x\":0, \"y\":0, \"width\":0, \"height\":0}\n"
+		"end for\n"
+		"atlas = raylib.GenImageFontAtlas(glyphs, recs, 16, 4, 0)\n"
+		"atlas2 = raylib.GenImageFontAtlas(glyphs, recs, 16, 4, 0)\n"
+		"junk = raylib.GenImageFontAtlas([42], [{}], 16, 4, 0)\n"
+		"w = atlas.width\n"
+		"packed = recs[0].width\n");
+	ok(g_err.empty(), "GenImageFontAtlas runs clean, repeatedly");
+	ok(readGlobal(a, "atlas").Type() == ValueType::Map, "...and returns an Image");
+	ok(readGlobal(a, "junk").IsNull(), "...a non-map glyph entry returns null");
+	ok(readGlobal(a, "w").IntValue() > 0, "...atlas has a width");
+	ok(readGlobal(a, "packed").IntValue() > 0, "...packed rectangles are written back to the list");
+	eqNum(Value(rcImage - before), 95 + 2, "...95 glyph images plus exactly one image per atlas");
+	run("raylib.LoadModelFromMesh {}\n"
+		"raylib.LoadModelFromMesh 12345\n");
+	ok(g_err.empty(), "LoadModelFromMesh with a junk mesh is not an error");
+	int models = rcModel;
+	Interpreter b = run("m = raylib.LoadModelFromMesh({})\n");
+	ok(readGlobal(b, "m").IsNull() && rcModel == models, "...it returns null and counts no model");
+	rcImage = before;
+}
+
 int main() {
 	GCManager::Init();
 	value_init_constants();
@@ -247,6 +277,7 @@ int main() {
 	testInterpCopies();
 	testDrawElementsBuffer();
 	testFontData();
+	testFontAtlas();
 
 	printf("\n%d checks, %d failures\n", checks, failures);
 	return failures == 0 ? 0 : 1;

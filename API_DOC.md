@@ -253,7 +253,7 @@
 |DrawBillboardRec |**camera**, **texture**, **source**, **position**, **size**=[1, 1], **tint**=WHITE |Draw a billboard (part of a texture defined by a rectangle) |
 |DrawBillboardPro |**camera**, **texture**, **source**, **position**, **up**=[0, 1, 0], **size**=[1, 1], **origin**=[0.5, 0.5], **rotation**=0, **tint**=WHITE |Draw a billboard with additional parameters |
 |LoadModel |**fileName** |Load model from files (mesh and material) |
-|LoadModelFromMesh |**mesh** |Load model from generated mesh WARNING: A shallow copy of mesh is generated, passed by value, as long as struct contains pointers to data and some values, get a copy of mesh pointing to same data as original version... be careful! |
+|LoadModelFromMesh |**mesh** |Load model from generated mesh. The model takes ownership of the mesh: the mesh is consumed by this call (UnloadModel frees it), so use the model from then on |
 |IsModelValid |**model** |Check if a model is valid (loaded in GPU, VAO/VBOs) |
 |UnloadModel |**model** |Unload model (meshes/materials) from memory (RAM and/or VRAM) NOTE: This function takes care of all model elements, for a detailed control over them, use UnloadMesh() and UnloadMaterial() |
 |GetModelBoundingBox |**model** |Compute model bounding box limits (considers all meshes) |
@@ -285,10 +285,10 @@
 |LoadMaterials |**fileName** |Load materials from model file |
 |LoadMaterialDefault | |Load default material (Supports: DIFFUSE, SPECULAR, NORMAL maps) |
 |IsMaterialValid |**material** |Check if a material is valid (map textures loaded in GPU) |
-|UnloadMaterial |**material** |Unload material from memory |
-|SetMaterialTexture |**material**, **mapType**, **texture** |Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...) NOTE: Previous texture should be manually unloaded |
+|UnloadMaterial |**material** |Unload material from memory. Also unloads the shader and every texture map set on it, so don't unload those separately |
+|SetMaterialTexture |**material**, **mapType**, **texture** |Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...) NOTE: Previous texture should be manually unloaded. The material owns the new texture: UnloadMaterial unloads it |
 |GetMaterialShader |**material** | |
-|SetMaterialShader |**material**, **shader** | |
+|SetMaterialShader |**material**, **shader** |The material owns the shader once set: UnloadMaterial unloads it |
 |GetMaterialShaderLocation |**material**, **uniformName** | |
 |GetMaterialShaderLocationAttrib |**material**, **attribName** | |
 |SetMaterialShaderValue |**material**, **locIndex**, **value**, **uniformType**=SHADER_UNIFORM_FLOAT | |

@@ -689,46 +689,44 @@ void AddRTextMethods(ValueDict& raylibModule) {
 	i.AddParam("padding");
 	i.AddParam("packMethod");
 	i.set_Code(INTRINSIC_LAMBDA {
-		ValueList glyphsList = context.GetArg(0).GetList();
-		ValueList recsList = context.GetArg(1).GetList();
+		Value glyphsVal = context.GetArg(0);
+		Value recsVal = context.GetArg(1);
+		if (glyphsVal.Type() != ValueType::List || recsVal.Type() != ValueType::List) return IntrinsicResult::Null;
+		ValueList glyphsList = glyphsVal.GetList();
+		ValueList recsList = recsVal.GetList();
 		int fontSize = context.GetArg(2).IntValue();
 		int padding = context.GetArg(3).IntValue();
 		int packMethod = context.GetArg(4).IntValue();
 
 		int glyphCount = glyphsList.Count();
 		if (glyphCount == 0 || glyphCount != recsList.Count()) return IntrinsicResult::Null;
+		for (int n = 0; n < glyphCount; n++) {
+			if (glyphsList[n].Type() != ValueType::Map) return IntrinsicResult::Null;
+		}
 
-		// Convert lists to arrays
 		GlyphInfo* glyphs = new GlyphInfo[glyphCount];
-		Rectangle* recs = new Rectangle[glyphCount];
-
-		for (int i = 0; i < glyphCount; i++) {
-			ValueDict glyphDict = glyphsList[i].GetDict();
-			glyphs[i].value = glyphDict.Lookup(String("value"), Value::zero).IntValue();
-			glyphs[i].offsetX = glyphDict.Lookup(String("offsetX"), Value::zero).IntValue();
-			glyphs[i].offsetY = glyphDict.Lookup(String("offsetY"), Value::zero).IntValue();
-			glyphs[i].advanceX = glyphDict.Lookup(String("advanceX"), Value::zero).IntValue();
-			glyphs[i].image = ValueToImage(glyphDict.Lookup(String("image"), Value::Null));
-
-			recs[i] = ValueToRectangle(recsList[i]);
+		for (int n = 0; n < glyphCount; n++) {
+			ValueDict glyphDict = glyphsList[n].GetDict();
+			glyphs[n].value = glyphDict.Lookup(String("value"), Value::zero).IntValue();
+			glyphs[n].offsetX = glyphDict.Lookup(String("offsetX"), Value::zero).IntValue();
+			glyphs[n].offsetY = glyphDict.Lookup(String("offsetY"), Value::zero).IntValue();
+			glyphs[n].advanceX = glyphDict.Lookup(String("advanceX"), Value::zero).IntValue();
+			glyphs[n].image = ValueToImage(glyphDict.Lookup(String("image"), Value::Null));
 		}
 
-		// GenImageFontAtlas modifies the recs array, so we need to pass a pointer
-		Rectangle** recsPtr = new Rectangle*;
-		*recsPtr = recs;
-
-		Image atlas = GenImageFontAtlas(glyphs, recsPtr, glyphCount, fontSize, padding, packMethod);
-
-		// Write the updated recs back into the MiniScript list
-		Rectangle* updatedRecs = *recsPtr;
-		for (int i = 0; i < glyphCount; i++) {
-			recsList[i] = RectangleToValue(updatedRecs[i]);
-		}
-
+		// raylib ignores any incoming rectangles and allocates a fresh (RL_MALLOC)
+		// array for the output, so pass it a null pointer and RL_FREE what comes back.
+		Rectangle* recs = nullptr;
+		Image atlas = GenImageFontAtlas(glyphs, &recs, glyphCount, fontSize, padding, packMethod);
 		delete[] glyphs;
-		delete[] updatedRecs;
-		delete recsPtr;
 
+		// Write the packed rectangles back into the MiniScript list
+		if (recs != nullptr) {
+			for (int n = 0; n < glyphCount; n++) recsList[n] = RectangleToValue(recs[n]);
+			RL_FREE(recs);
+		}
+
+		if (atlas.data == nullptr) return IntrinsicResult::Null;
 		rcImage++;
 		return IntrinsicResult(ImageToValue(atlas));
 	});
