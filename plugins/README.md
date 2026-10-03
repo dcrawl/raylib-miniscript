@@ -102,7 +102,8 @@ writing each one's `API.md` but adding no link to the public `API_DOC.md`.
 `scripts/gen_doc.ms` writes your plugin's API into `plugins/<name>/API.md` (and adds a link
 to it in `API_DOC.md`).  It finds your functions from the `SetValue(String("fn"), f.GetFunc())`
 lines in the function you pass to `PluginAddModule`, so keep that shape.  The "Purpose" column
-comes from the comment directly above each `Intrinsic::Create`.
+comes from the comment directly above each `Intrinsic::Create`; for more than one line, or text
+that must be exact, put `// API: text` lines there instead (several are joined with spaces).
 
 The generated table sits between `<!-- BEGIN GENERATED API -->` and `<!-- END GENERATED API -->`
 markers.  Write your own notes (setup, caveats, examples) anywhere outside them: reruns replace

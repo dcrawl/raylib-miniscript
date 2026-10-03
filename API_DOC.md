@@ -288,7 +288,7 @@
 |UnloadMaterial |**material** |Unload material from memory. Also unloads the shader and every texture map set on it, so don't unload those separately |
 |SetMaterialTexture |**material**, **mapType**, **texture** |Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...) NOTE: Previous texture should be manually unloaded. The material owns the new texture: UnloadMaterial unloads it |
 |GetMaterialShader |**material** | |
-|SetMaterialShader |**material**, **shader** |The material owns the shader once set: UnloadMaterial unloads it |
+|SetMaterialShader |**material**, **shader** |The material owns the shader once set: UnloadMaterial unloads it. |
 |GetMaterialShaderLocation |**material**, **uniformName** | |
 |GetMaterialShaderLocationAttrib |**material**, **attribName** | |
 |SetMaterialShaderValue |**material**, **locIndex**, **value**, **uniformType**=SHADER_UNIFORM_FLOAT | |
@@ -947,6 +947,7 @@
 |import |**libname**="" |Import a MiniScript library by name, searching MS_IMPORT_PATH |
 |exit |**resultCode** |Exit the program with the given result code |
 |env | |Get a map of all environment variables |
+|shellArgs | |Get the script path and the command-line arguments following it |
 |run |**path**="" |Load and run a MiniScript file in the current interpreter context |
 |resourceCounts | |Get a map of currently loaded resource counts by type (Image, Texture, Font, etc.) |
 |hostMemory | |see HostBytesInUse above. |

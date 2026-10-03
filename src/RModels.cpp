@@ -676,6 +676,7 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("LoadModel", i.GetFunc());
 
+	// API: Load model from generated mesh. The model takes ownership of the mesh: the mesh is consumed by this call (UnloadModel frees it), so use the model from then on
 	i = Intrinsic::Create("");
 	i.AddParam("mesh");
 	i.set_Code(INTRINSIC_LAMBDA {
@@ -1141,6 +1142,7 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 
 	// UnloadMaterial also unloads the material's shader and every texture map set on it
 	// (raylib behavior), so don't UnloadTexture/UnloadShader those separately.
+	// API: Unload material from memory. Also unloads the shader and every texture map set on it, so don't unload those separately
 	i = Intrinsic::Create("");
 	i.AddParam("material");
 	i.set_Code(INTRINSIC_LAMBDA {
@@ -1156,6 +1158,7 @@ void AddRModelsMethods(ValueDict& raylibModule) {
 
 	// The material owns the texture once set: UnloadMaterial unloads it.  The previous
 	// texture is not unloaded here.
+	// API: Set texture for a material map type (MATERIAL_MAP_DIFFUSE, MATERIAL_MAP_SPECULAR...) NOTE: Previous texture should be manually unloaded. The material owns the new texture: UnloadMaterial unloads it
 	i = Intrinsic::Create("");
 	i.AddParam("material");
 	i.AddParam("mapType");

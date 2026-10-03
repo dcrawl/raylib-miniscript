@@ -1,6 +1,15 @@
 #!/usr/bin/env miniscript
 
-// This script generates API_DOC.md by crawling the source files.
+// This script generates API_DOC.md by crawling the source files.  Run it from
+// the repo root:  ./build/raylib-miniscript scripts/gen_doc.ms
+//
+// Where each entry's "Purpose" text comes from, in order of preference:
+//   1. "// API: text" line(s) directly above the Intrinsic::Create of a binding
+//      (used verbatim; several in a row are joined with spaces).  Put the doc
+//      text here when the generated one isn't right -- never edit API_DOC.md
+//      by hand, the next run would undo it.
+//   2. the note on the function of the same name in the Raylib sources
+//   3. the (last line of the) "// ..." comment above the Intrinsic::Create
 
 import "stringUtil"
 
@@ -83,8 +92,20 @@ processBindingFile = function(path, moduleVar="raylibModule", heading="")
 	params = []
 	pendingNote = ""  // inline comment accumulated just before a Create line
 	createNote = ""   // pendingNote as it stood at the Create line
+	apiNote = ""      // text of "// API: " lines just before a Create line
+	createApiNote = ""// apiNote as it stood at the Create line
 	for line in file.readLines(path)
 		line = line.trim
+
+		// "// API: text" lines are the documentation for the intrinsic that
+		// follows, verbatim: they replace the Raylib note and any other comment.
+		// Use them where the generated text isn't enough (ownership rules,
+		// restrictions on arguments).  Several in a row are joined with spaces.
+		if line.startsWith("// API: ") then
+			if apiNote != "" then apiNote = apiNote + " "
+			apiNote = apiNote + line[8:]
+			continue
+		end if
 
 		// Accumulate inline doc comments
 		if line.startsWith("// ") then
@@ -96,6 +117,7 @@ processBindingFile = function(path, moduleVar="raylibModule", heading="")
 		// leave it intact so it survives across Create/AddParam/code=/lambda lines.
 		if line == "" then
 			pendingNote = ""
+			apiNote = ""
 			continue
 		end if
 
@@ -104,6 +126,8 @@ processBindingFile = function(path, moduleVar="raylibModule", heading="")
 		if line.contains("= Intrinsic::Create(") then
 			params = []
 			createNote = pendingNote
+			createApiNote = apiNote
+			apiNote = ""
 			continue
 		end if
 
@@ -143,7 +167,9 @@ processBindingFile = function(path, moduleVar="raylibModule", heading="")
 			end if
 			apiCount += 1
 
-			if functionNotes.hasIndex(m.api) then
+			if createApiNote != "" then
+				note = createApiNote
+			else if functionNotes.hasIndex(m.api) then
 				note = functionNotes[m.api]
 			else if createNote != "" then
 				note = createNote
@@ -157,6 +183,7 @@ processBindingFile = function(path, moduleVar="raylibModule", heading="")
 			params = []
 			pendingNote = ""
 			createNote = ""
+			createApiNote = ""
 		end if
 	end for
 	print "   " + apiCount + " APIs"

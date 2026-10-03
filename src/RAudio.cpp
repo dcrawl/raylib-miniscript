@@ -497,6 +497,7 @@ void AddRAudioMethods(ValueDict& raylibModule) {
 	});
 	raylibModule.SetValue("UnloadSound", i.GetFunc());
 
+	// API: Also delete the heap-allocated Sound
 	i = Intrinsic::Create("");
 	i.AddParam("alias");
 	i.set_Code(INTRINSIC_LAMBDA {
