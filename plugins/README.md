@@ -25,7 +25,8 @@ MS_PLUGIN_RESET(mything)    { }   // optional: before the script (re)starts
 MS_PLUGIN_SHUTDOWN(mything) { }   // optional: app closing (reverse load order)
 ```
 
-See `quadtree/plugin.cpp` for a complete example.
+See `quadtree/plugin.cpp` for a complete example, and `quadtree/test.ms` for a test script
+(`./build/raylib-miniscript plugins/quadtree/test.ms`).
 
 ## plugin.cmake
 
@@ -50,5 +51,6 @@ Leave plugins out of a build with `-DMS_DISABLE_PLUGINS="mything;other"`.
 - Batch work: let a script make one native call for many items, not one per item.
 - Keep native objects in GC handles with a finalizer (see `NewNativeHandle` in `src/RaylibTypes.h`).
 - Async SDK results (purchases, ads) should go into a queue the script polls; never call into the VM from another thread. Pump the SDK in `MS_PLUGIN_UPDATE`.
+- Log through raylib (`TraceLog(LOG_INFO / LOG_WARNING / LOG_ERROR, "MYTHING: ...", ...)`), not `printf`, so plugin messages follow the engine's log level and callback.
 - Guard platform-specific code with `PLATFORM_DESKTOP` / `PLATFORM_WEB`.
 - Plugins are trusted code: they run in-process with full access, outside the file-system sandbox.

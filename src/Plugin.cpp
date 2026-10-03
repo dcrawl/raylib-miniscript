@@ -6,11 +6,11 @@
 //
 
 #include "Plugin.h"
-#include <cstdio>
+#include "raylib.h"
 
 void PluginsInit() {
 	for (const MSPluginEntry* p = kMSPlugins; p->name != nullptr; p++) {
-		printf("Loading plugin: %s\n", p->name);
+		TraceLog(LOG_INFO, "PLUGIN: Loading %s", p->name);
 		if (p->init) p->init();
 	}
 }
